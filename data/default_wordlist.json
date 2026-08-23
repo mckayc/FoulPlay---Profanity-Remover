@@ -1,0 +1,19 @@
+{
+  "words": [
+    { "word": "damn", "replacements": ["darn"] },
+    { "word": "hell", "replacements": ["heck"] },
+    { "word": "crap", "replacements": ["crud"] },
+    { "word": "ass", "replacements": ["butt"] },
+    { "word": "bitch", "replacements": ["witch", "jerk"] },
+    { "word": "bastard", "replacements": ["jerk"] },
+    { "word": "shit", "replacements": ["shoot", "sugar"] },
+    { "word": "piss", "replacements": ["pee"] },
+    { "word": "fuck", "replacements": ["fudge", "freak"] },
+    { "word": "goddamn", "replacements": ["dang"] },
+    { "word": "bloody", "replacements": ["blooming"] },
+    { "word": "dick", "replacements": ["jerk"] },
+    { "word": "pussy", "replacements": ["wimp"] },
+    { "word": "whore", "replacements": ["tramp"] },
+    { "word": "slut", "replacements": ["tramp"] }
+  ]
+}

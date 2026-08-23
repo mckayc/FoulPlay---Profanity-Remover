@@ -1,0 +1,30 @@
+# Core UI
+PySide6>=6.7
+
+# Config / data
+pydantic>=2.7
+
+# Note: media probing/audio ops go through the system ffmpeg/ffprobe binaries
+# via subprocess (core/media.py) -- no ffmpeg Python wrapper package needed.
+
+# Subtitle IO
+pysubs2>=1.7
+
+# Sample-level audio editing (silence/volume/beep + fades on the isolated
+# dialogue stem). Lightweight; relies on the system ffmpeg already required
+# for media probing/muxing, not a bundled codec stack.
+pydub>=0.25
+
+# ASR (added in milestone 2)
+# faster-whisper>=1.0
+
+# Forced alignment (added in milestone 6)
+# whisperx
+
+# Source separation (added in milestone 4)
+# demucs
+# torch
+# torchaudio
+
+# AMD/Intel GPU acceleration on Windows (optional, added in milestone 4)
+# torch-directml

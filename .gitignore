@@ -1,0 +1,13 @@
+.venv/
+.claude/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+build/
+dist/
+dist_installer/
+packaging/runtime_template/
+*.spec.bak
+*.fpproj
+/output/
