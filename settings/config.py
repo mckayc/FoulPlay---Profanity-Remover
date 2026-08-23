@@ -51,12 +51,15 @@ class AudioEditSettings(BaseModel):
     mode: AudioEditMode = AudioEditMode.SILENCE
     volume_db: float = -60.0  # used when mode == VOLUME (0 dB = no change)
     beep_frequency_hz: float = 1000.0  # used when mode == BEEP
-    fade_ms: float = 8.0  # applied at cut boundaries regardless of mode
+    pad_before_ms: float = 50.0  # extends the edited window before the word's detected start
+    pad_after_ms: float = 50.0  # extends the edited window after the word's detected end
+    fade_ms: float = 8.0  # fade in/out duration applied at the (padded) window's edges
 
 
 class SubtitleSettings(BaseModel):
-    generate_clean_track: bool = True
-    generate_forced_track: bool = False
+    # All three subtitle tracks (unedited / substituted / substitute-only)
+    # are always generated -- this only controls what the substitute-only
+    # ("forced") track shows during an edited line.
     forced_text_mode: SubtitleTextMode = SubtitleTextMode.WORD_ONLY
 
 

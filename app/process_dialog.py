@@ -4,6 +4,7 @@ audio edits, remix, subtitle generation, and final MKV mux.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -12,9 +13,12 @@ from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QPushButton, QVBoxL
 from core import media, mux, subtitle_gen
 from core.audio_edit import edit_vocals, remix
 from core.audio_isolate import separate_dialogue
+from core.report_gen import save_change_report
 from core.transcript import Transcript
 from projects.project_file import EditDecision
 from settings.config import AppSettings
+
+logger = logging.getLogger(__name__)
 
 
 class _ProcessWorker(QThread):
@@ -68,18 +72,19 @@ class _ProcessWorker(QThread):
 
             self.status.emit("Generating subtitles...")
             self.progress.emit(85)
-            clean_srt_path = None
-            forced_srt_path = None
-            if self._settings.subtitles.generate_clean_track:
-                clean_subs = subtitle_gen.build_clean_subtitles(self._transcript, self._edits)
-                clean_srt_path = self._workdir / "clean.srt"
-                clean_subs.save(str(clean_srt_path))
-            if self._settings.subtitles.generate_forced_track:
-                forced_subs = subtitle_gen.build_forced_subtitles(
-                    self._transcript, self._edits, self._settings.subtitles.forced_text_mode
-                )
-                forced_srt_path = self._workdir / "forced.srt"
-                forced_subs.save(str(forced_srt_path))
+            unedited_subs = subtitle_gen.build_unedited_subtitles(self._transcript)
+            unedited_srt_path = self._workdir / "unedited.srt"
+            unedited_subs.save(str(unedited_srt_path))
+
+            clean_subs = subtitle_gen.build_clean_subtitles(self._transcript, self._edits)
+            clean_srt_path = self._workdir / "clean.srt"
+            clean_subs.save(str(clean_srt_path))
+
+            forced_subs = subtitle_gen.build_forced_subtitles(
+                self._transcript, self._edits, self._settings.subtitles.forced_text_mode
+            )
+            forced_srt_path = self._workdir / "forced.srt"
+            forced_subs.save(str(forced_srt_path))
 
             self.status.emit("Muxing final file...")
             self.progress.emit(95)
@@ -90,13 +95,19 @@ class _ProcessWorker(QThread):
                 output_path=self._output_path,
                 original_audio_count=len(probe.audio_streams),
                 original_subtitle_count=len(probe.subtitle_streams),
+                unedited_subtitles_srt=unedited_srt_path,
                 clean_subtitles_srt=clean_srt_path,
                 forced_subtitles_srt=forced_srt_path,
             )
 
+            self.status.emit("Writing change report...")
+            report_path = self._output_path.with_name(f"{self._output_path.stem} - Changes.txt")
+            save_change_report(self._video_path, self._transcript, self._edits, report_path)
+
             self.progress.emit(100)
             self.finished_ok.emit(self._output_path)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Processing worker failed")
             self.failed.emit(str(exc))
 
 

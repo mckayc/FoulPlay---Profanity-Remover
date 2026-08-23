@@ -4,6 +4,7 @@ background, then reports the resulting Transcript back to the caller.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -13,6 +14,8 @@ from core import media
 from core.transcribe import transcribe_audio
 from core.transcript import Transcript
 from settings.config import PerformanceSettings
+
+logger = logging.getLogger(__name__)
 
 
 class _TranscribeWorker(QThread):
@@ -53,6 +56,7 @@ class _TranscribeWorker(QThread):
             self.progress.emit(100)
             self.finished_ok.emit(transcript)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Transcription worker failed")
             self.failed.emit(str(exc))
 
 

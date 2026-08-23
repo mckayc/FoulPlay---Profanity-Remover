@@ -11,6 +11,7 @@ enough there).
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import tempfile
 from collections.abc import Callable
@@ -19,6 +20,8 @@ from pathlib import Path
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_ml_worker_script, get_runtime_python
 from core.transcript import Sentence, Transcript, Word
+
+logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[float, float], None]  # (seconds_processed, total_seconds)
 
@@ -49,6 +52,16 @@ def transcribe_audio(
     runtime_python = get_runtime_python()
     worker_script = get_ml_worker_script()
     device, compute_type = pick_device_and_compute_type(prefer_gpu)
+    logger.info(
+        "Transcribing %s (model=%s language=%s vad=%s beam=%s device=%s compute=%s)",
+        audio_path,
+        model_size,
+        language,
+        vad_filter,
+        beam_size,
+        device,
+        compute_type,
+    )
 
     with tempfile.TemporaryDirectory(prefix="foulplay_worker_") as tmp:
         tmp_dir = Path(tmp)
@@ -78,6 +91,7 @@ def transcribe_audio(
             "--out-json",
             str(out_path),
         ]
+        logger.debug("Running: %s", " ".join(cmd))
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         assert process.stdout is not None
         for line in process.stdout:
@@ -87,6 +101,7 @@ def transcribe_audio(
             try:
                 payload = json.loads(line)
             except json.JSONDecodeError:
+                logger.debug("[ml_worker] %s", line)
                 continue
             progress = payload.get("progress")
             if progress and on_progress:
@@ -94,14 +109,22 @@ def transcribe_audio(
         process.wait()
 
         if not out_path.exists():
+            logger.error("Transcription worker produced no output (exit code %s)", process.returncode)
             raise TranscriptionError(
                 f"Transcription worker produced no output (exit code {process.returncode})."
             )
         result = json.loads(out_path.read_text(encoding="utf-8"))
 
     if "error" in result:
+        logger.error("Transcription worker reported an error: %s", result["error"])
         raise TranscriptionError(result["error"])
 
     words = [Word(**w) for w in result["words"]]
     sentences = [Sentence(**s) for s in result["sentences"]]
+    logger.info(
+        "Transcription complete: %d sentences, %d words, detected language=%s",
+        len(sentences),
+        len(words),
+        result.get("source_language"),
+    )
     return Transcript(words=words, sentences=sentences, source_language=result.get("source_language", "en"))

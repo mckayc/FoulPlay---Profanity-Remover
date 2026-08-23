@@ -5,9 +5,12 @@ a manual install step (keeps the app self-serve).
 
 from __future__ import annotations
 
+import logging
 import shutil
 import subprocess
 from collections.abc import Callable
+
+logger = logging.getLogger(__name__)
 
 WINGET_PACKAGE_ID = "Gyan.FFmpeg"
 
@@ -41,12 +44,17 @@ def install_ffmpeg_via_winget(on_output: Callable[[str], None] | None = None) ->
         "--accept-package-agreements",
         "--accept-source-agreements",
     ]
+    logger.info("Installing FFmpeg via winget: %s", " ".join(cmd))
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     assert process.stdout is not None
     for line in process.stdout:
+        line = line.rstrip()
+        logger.debug("[winget] %s", line)
         if on_output:
-            on_output(line.rstrip())
+            on_output(line)
     process.wait()
 
     if process.returncode != 0:
+        logger.error("winget install of FFmpeg failed (exit code %s)", process.returncode)
         raise FfmpegInstallError(f"winget install failed (exit code {process.returncode}).")
+    logger.info("FFmpeg installed successfully via winget")

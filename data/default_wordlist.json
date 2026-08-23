@@ -14,6 +14,27 @@
     { "word": "dick", "replacements": ["jerk"] },
     { "word": "pussy", "replacements": ["wimp"] },
     { "word": "whore", "replacements": ["tramp"] },
-    { "word": "slut", "replacements": ["tramp"] }
+    { "word": "slut", "replacements": ["tramp"] },
+    { "word": "twat", "replacements": ["jerk"] },
+    { "word": "prick", "replacements": ["jerk"] },
+    { "word": "douche", "replacements": ["jerk"] },
+    { "word": "wanker", "replacements": ["jerk"] },
+    { "word": "twit", "replacements": ["goof"] },
+    { "word": "skank", "replacements": ["tramp"] },
+    { "word": "bimbo", "replacements": ["airhead"] },
+    { "word": "bollocks", "replacements": ["nonsense"] },
+    { "word": "arse", "replacements": ["butt"] },
+    { "word": "cunt", "replacements": ["jerk"] },
+    { "word": "asshole", "replacements": ["jerk"] },
+    { "word": "jackass", "replacements": ["goofball"] },
+    { "word": "dumbass", "replacements": ["dummy"] },
+    { "word": "bullshit", "replacements": ["baloney"] },
+    { "word": "horseshit", "replacements": ["nonsense"] },
+    { "word": "motherfucker", "replacements": ["jerk", "so-and-so"] },
+    { "word": "shithead", "replacements": ["knucklehead"] },
+    { "word": "dipshit", "replacements": ["dummy"] },
+    { "word": "goddammit", "replacements": ["dang it"] },
+    { "word": "douchebag", "replacements": ["jerk"] },
+    { "word": "arsehole", "replacements": ["jerk"] }
   ]
 }

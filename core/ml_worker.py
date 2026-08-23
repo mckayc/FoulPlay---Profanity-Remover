@@ -21,13 +21,77 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import time
+from pathlib import Path
+
+# Force huggingface_hub to copy model files into the snapshot directory
+# instead of symlinking to a shared blob store. Every observed
+# "Unable to open file 'model.bin'" failure followed a *freshly created*
+# symlink being opened immediately afterward -- consistent with Windows
+# security software (Defender/SmartScreen behavior monitoring) scrutinizing
+# file access from this unsigned app's spawned processes around a new
+# reparse point into a huge binary. A real file copy has no such
+# just-created-symlink window for that class of interference to hit.
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS", "1")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
+
+_MODEL_LOAD_ATTEMPTS = 3
+_MODEL_LOAD_RETRY_DELAY_SECONDS = 2.0
+
+
+def _purge_model_cache(model_size: str) -> None:
+    """Deletes the cached snapshot for this model so the next load attempt
+    does a genuinely fresh download (using real file copies, since
+    HF_HUB_DISABLE_SYMLINKS is set above) rather than reusing a
+    possibly-broken symlink-based snapshot from before that env var took
+    effect.
+    """
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except ImportError:
+        return
+
+    import shutil
+
+    cache_dir = Path(HF_HUB_CACHE) / f"models--Systran--faster-whisper-{model_size}"
+    if cache_dir.exists():
+        print(f"Purging cached model directory: {cache_dir}", file=sys.stderr, flush=True)
+        shutil.rmtree(cache_dir, ignore_errors=True)
+
+
+def _load_model_with_retry(model_size: str, device: str, compute_type: str):
+    """Loading a freshly-downloaded model can transiently fail on Windows
+    (observed: 'Unable to open file model.bin' immediately after
+    huggingface_hub creates the cache symlink, likely Windows security
+    software scrutinizing file access from this unsigned app's spawned
+    processes). A short retry alone wasn't enough when the *existing*
+    cache was already symlink-based; purging the cache before retrying
+    forces a fresh, symlink-free download to fully rule that out.
+    """
+    from faster_whisper import WhisperModel
+
+    last_error: Exception | None = None
+    for attempt in range(1, _MODEL_LOAD_ATTEMPTS + 1):
+        try:
+            return WhisperModel(model_size, device=device, compute_type=compute_type)
+        except Exception as exc:  # noqa: BLE001
+            last_error = exc
+            print(
+                f"Model load attempt {attempt}/{_MODEL_LOAD_ATTEMPTS} failed: {exc}",
+                file=sys.stderr,
+                flush=True,
+            )
+            if attempt < _MODEL_LOAD_ATTEMPTS:
+                _purge_model_cache(model_size)
+                time.sleep(_MODEL_LOAD_RETRY_DELAY_SECONDS)
+    assert last_error is not None
+    raise last_error
 
 
 def _run_transcribe(args: dict) -> dict:
-    from faster_whisper import WhisperModel
-
-    model = WhisperModel(args["model_size"], device=args["device"], compute_type=args["compute_type"])
+    model = _load_model_with_retry(args["model_size"], args["device"], args["compute_type"])
     segments, info = model.transcribe(
         args["audio_path"],
         word_timestamps=True,

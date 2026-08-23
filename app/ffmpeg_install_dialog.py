@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
@@ -13,6 +15,8 @@ from PySide6.QtWidgets import (
 
 from core.ffmpeg_installer import MANUAL_INSTALL_HINT, install_ffmpeg_via_winget, is_winget_available
 
+logger = logging.getLogger(__name__)
+
 
 class _FfmpegInstallWorker(QThread):
     output = Signal(str)
@@ -23,6 +27,7 @@ class _FfmpegInstallWorker(QThread):
         try:
             install_ffmpeg_via_winget(on_output=self.output.emit)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("FFmpeg install worker failed")
             self.failed.emit(str(exc))
             return
         self.finished_ok.emit()

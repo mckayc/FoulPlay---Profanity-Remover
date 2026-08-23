@@ -7,12 +7,15 @@ and lets progress be streamed line-by-line from stdout.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_runtime_python
+
+logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "htdemucs"
 
@@ -59,19 +62,25 @@ def separate_dialogue(
         str(output_dir),
         str(audio_wav),
     ]
+    logger.info("Running Demucs separation: %s", " ".join(cmd))
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     assert process.stdout is not None
     for line in process.stdout:
+        line = line.rstrip()
+        logger.debug("[demucs] %s", line)
         if on_output:
-            on_output(line.rstrip())
+            on_output(line)
     process.wait()
 
     if process.returncode != 0:
+        logger.error("Demucs separation failed (exit code %s)", process.returncode)
         raise SeparationError(f"Demucs separation failed (exit code {process.returncode}).")
 
     stem_dir = output_dir / _MODEL_NAME / audio_wav.stem
     vocals = stem_dir / "vocals.wav"
     accompaniment = stem_dir / "no_vocals.wav"
     if not vocals.exists() or not accompaniment.exists():
+        logger.error("Expected Demucs output not found in %s", stem_dir)
         raise SeparationError(f"Expected Demucs output not found in {stem_dir}")
+    logger.info("Demucs separation complete: vocals=%s accompaniment=%s", vocals, accompaniment)
     return vocals, accompaniment

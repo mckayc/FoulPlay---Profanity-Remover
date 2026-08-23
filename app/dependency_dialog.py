@@ -8,6 +8,8 @@ what can be a multi-hundred-megabyte download.
 
 from __future__ import annotations
 
+import logging
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QDialog,
@@ -19,6 +21,8 @@ from PySide6.QtWidgets import (
 )
 
 from core.dependencies import DependencyGroup, install_group
+
+logger = logging.getLogger(__name__)
 
 
 class _InstallWorker(QThread):
@@ -36,6 +40,7 @@ class _InstallWorker(QThread):
                 self.output.emit(f"--- Installing: {group.label} ---")
                 install_group(group, on_output=self.output.emit)
         except Exception as exc:  # noqa: BLE001
+            logger.exception("Dependency install worker failed")
             self.failed.emit(str(exc))
             return
         self.finished_ok.emit()

@@ -15,9 +15,12 @@ Detection is split into two layers:
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
+
+logger = logging.getLogger(__name__)
 
 
 class Accelerator(str, Enum):
@@ -153,6 +156,15 @@ def get_hardware_report() -> HardwareReport:
                 "significantly slower -- plan for potentially several hours to "
                 "process a full-length movie."
             )
+
+    logger.info(
+        "Hardware detected: gpus=%s torch_installed=%s cuda=%s directml=%s -> accelerator=%s",
+        [g.name for g in gpus],
+        torch_installed,
+        cuda_available,
+        directml_available,
+        accelerator,
+    )
 
     return HardwareReport(
         gpus=gpus,

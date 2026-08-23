@@ -4,6 +4,7 @@ grouping hits with their sentence for full context in the review screen.
 
 from __future__ import annotations
 
+import logging
 import random
 import re
 from dataclasses import dataclass
@@ -11,11 +12,36 @@ from dataclasses import dataclass
 from core.transcript import Sentence, Transcript, Word
 from settings.config import WordEntry
 
+logger = logging.getLogger(__name__)
+
 _STRIP_RE = re.compile(r"^[^\w']+|[^\w']+$")
+
+# Common inflectional endings a listed root word might carry in real speech
+# (e.g. "fuck" -> "fucking"/"fucked"/"fucker", "ass" -> "asses"). Deliberately
+# NOT open-ended prefix or substring matching -- that would also flag
+# unrelated words like "hello" (starts with "hell") or "class"/"grass"
+# (contain "ass"). Requiring the remainder after the root to be one of
+# these known suffixes keeps matches to genuine inflections of the word.
+_INFLECTION_SUFFIXES = ("", "s", "es", "ed", "ing", "er", "ers", "y", "ty", "in", "it")
 
 
 def normalize_word(text: str) -> str:
     return _STRIP_RE.sub("", text).lower()
+
+
+def _matches_root(normalized_word: str, root: str) -> bool:
+    """True if normalized_word is exactly root, or root plus a recognized
+    inflectional suffix (including a doubled trailing consonant before a
+    vowel suffix, e.g. "shit" -> "shitting").
+    """
+    if not root or not normalized_word.startswith(root):
+        return False
+    remainder = normalized_word[len(root):]
+    if remainder in _INFLECTION_SUFFIXES:
+        return True
+    if remainder and remainder[0] == root[-1] and remainder[1:] in _INFLECTION_SUFFIXES:
+        return True
+    return False
 
 
 @dataclass
@@ -35,8 +61,18 @@ class Match:
 
 
 def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[Match]:
-    lookup = {e.word.strip().lower(): e for e in word_entries if e.enabled and e.word.strip()}
-    if not lookup:
+    # Longest root first, so e.g. a listed "asshole" wins over a listed "ass"
+    # for a word that matches both.
+    roots = sorted(
+        (
+            (e.word.strip().lower(), e)
+            for e in word_entries
+            if e.enabled and e.word.strip()
+        ),
+        key=lambda pair: len(pair[0]),
+        reverse=True,
+    )
+    if not roots:
         return []
 
     occurrence_counts: dict[tuple[int, str], int] = {}
@@ -44,7 +80,9 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
 
     for index, word in enumerate(transcript.words):
         normalized = normalize_word(word.text)
-        entry = lookup.get(normalized)
+        if not normalized:
+            continue
+        entry = next((e for root, e in roots if _matches_root(normalized, root)), None)
         if entry is None:
             continue
         sentence = transcript.sentence_by_id(word.sentence_id)
@@ -69,6 +107,7 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
             )
         )
 
+    logger.info("Profanity matching found %d hit(s) against %d configured word(s)", len(matches), len(roots))
     return matches
 
 

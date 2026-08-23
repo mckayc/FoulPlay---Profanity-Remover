@@ -136,6 +136,18 @@ class AudioEditTab(QWidget):
         self.beep_spin.setValue(settings.audio_edit.beep_frequency_hz)
         layout.addRow("Beep frequency:", self.beep_spin)
 
+        self.pad_before_spin = QDoubleSpinBox()
+        self.pad_before_spin.setRange(0.0, 1000.0)
+        self.pad_before_spin.setSuffix(" ms")
+        self.pad_before_spin.setValue(settings.audio_edit.pad_before_ms)
+        layout.addRow("Extra spacing before word:", self.pad_before_spin)
+
+        self.pad_after_spin = QDoubleSpinBox()
+        self.pad_after_spin.setRange(0.0, 1000.0)
+        self.pad_after_spin.setSuffix(" ms")
+        self.pad_after_spin.setValue(settings.audio_edit.pad_after_ms)
+        layout.addRow("Extra spacing after word:", self.pad_after_spin)
+
         self.fade_spin = QDoubleSpinBox()
         self.fade_spin.setRange(0.0, 100.0)
         self.fade_spin.setSuffix(" ms")
@@ -149,6 +161,8 @@ class AudioEditTab(QWidget):
             mode=self.mode_combo.currentData(),
             volume_db=self.volume_spin.value(),
             beep_frequency_hz=self.beep_spin.value(),
+            pad_before_ms=self.pad_before_spin.value(),
+            pad_after_ms=self.pad_after_spin.value(),
             fade_ms=self.fade_spin.value(),
         )
 
@@ -159,17 +173,15 @@ class SubtitleTab(QWidget):
 
         layout = QVBoxLayout(self)
 
-        self.clean_checkbox = QCheckBox("Generate a subtitle track with replacement words")
-        self.clean_checkbox.setChecked(settings.subtitles.generate_clean_track)
-        layout.addWidget(self.clean_checkbox)
-
-        self.forced_checkbox = QCheckBox(
-            "Also generate a forced track that auto-displays only on edited lines"
+        info = QLabel(
+            "Every cleaned video gets three subtitle tracks: the full unedited transcript, "
+            "a version with profanity replaced throughout, and a substitute-only track that "
+            "stays hidden except during edited lines."
         )
-        self.forced_checkbox.setChecked(settings.subtitles.generate_forced_track)
-        layout.addWidget(self.forced_checkbox)
+        info.setWordWrap(True)
+        layout.addWidget(info)
 
-        forced_group = QGroupBox("Forced track content")
+        forced_group = QGroupBox("Substitute-only track content")
         forced_layout = QFormLayout(forced_group)
         self.forced_text_combo = QComboBox()
         self.forced_text_combo.addItem("Replacement word only", SubtitleTextMode.WORD_ONLY)
@@ -184,8 +196,6 @@ class SubtitleTab(QWidget):
         from settings.config import SubtitleSettings
 
         return SubtitleSettings(
-            generate_clean_track=self.clean_checkbox.isChecked(),
-            generate_forced_track=self.forced_checkbox.isChecked(),
             forced_text_mode=self.forced_text_combo.currentData(),
         )
 

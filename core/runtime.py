@@ -16,11 +16,14 @@ on demand. This keeps the installer itself small.
 
 from __future__ import annotations
 
+import logging
 import shutil
 import sys
 from pathlib import Path
 
 from settings.config import get_config_dir
+
+logger = logging.getLogger(__name__)
 
 RUNTIME_DIR_NAME = "runtime"
 
@@ -80,31 +83,57 @@ def is_runtime_ready() -> bool:
 
 def ensure_runtime_ready() -> str:
     """Copies the bundled runtime template to the per-user managed runtime
-    directory if it isn't there yet. Returns the runtime python path.
-    No-op (returns sys.executable) when not frozen.
+    directory if it isn't there yet (the expensive part -- embeddable
+    Python + pip, done once). Returns the runtime python path. No-op
+    (returns sys.executable) when not frozen.
+
+    The lightweight worker script(s) (ml_worker.py) are re-synced from the
+    template on every call, even when the heavy runtime already exists --
+    an app update can ship a fixed/updated worker without requiring a full
+    runtime re-bootstrap, so an existing install doesn't get stuck running
+    a stale worker script forever.
     """
     if not is_frozen():
         return sys.executable
 
     managed_dir = _managed_runtime_dir()
     managed_python = managed_dir / "python.exe"
+    template_dir = _bundled_runtime_template()
+
     if managed_python.exists():
+        _sync_worker_scripts(template_dir, managed_dir)
         return str(managed_python)
 
-    template_dir = _bundled_runtime_template()
     if not template_dir.exists():
+        logger.error("Bundled runtime template not found at %s", template_dir)
         raise RuntimeSetupError(
             f"Bundled runtime template not found at {template_dir}. This build was not "
             "packaged correctly -- see packaging/build_runtime_template.py."
         )
 
+    logger.info("Bootstrapping managed ML runtime: %s -> %s", template_dir, managed_dir)
     managed_dir.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(template_dir, managed_dir, dirs_exist_ok=True)
 
     if not managed_python.exists():
+        logger.error("Runtime copy to %s did not produce python.exe", managed_dir)
         raise RuntimeSetupError(f"Runtime copy to {managed_dir} did not produce python.exe.")
 
+    logger.info("Managed ML runtime ready at %s", managed_python)
     return str(managed_python)
+
+
+def _sync_worker_scripts(template_dir: Path, managed_dir: Path) -> None:
+    if not template_dir.exists():
+        return
+    for script in template_dir.glob("*.py"):
+        dest = managed_dir / script.name
+        try:
+            if not dest.exists() or dest.read_bytes() != script.read_bytes():
+                shutil.copy2(script, dest)
+                logger.info("Synced updated worker script: %s", dest)
+        except OSError as exc:
+            logger.warning("Could not sync worker script %s: %s", script.name, exc)
 
 
 __all__ = [

@@ -40,15 +40,18 @@ def _render_sentence_html(match: Match) -> str:
 
 
 class _MatchRow(QFrame):
-    def __init__(self, match: Match, parent: QWidget | None = None) -> None:
+    def __init__(self, match: Match, prior: EditDecision | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.match = match
         self.setFrameShape(QFrame.Shape.StyledPanel)
 
+        initial_include = prior.include if prior is not None else match.include
+        initial_replacement = prior.replacement if prior is not None else match.replacement
+
         layout = QHBoxLayout(self)
 
         self.include_checkbox = QCheckBox()
-        self.include_checkbox.setChecked(match.include)
+        self.include_checkbox.setChecked(initial_include)
         self.include_checkbox.setToolTip("Include this edit")
         layout.addWidget(self.include_checkbox)
 
@@ -60,12 +63,12 @@ class _MatchRow(QFrame):
         arrow_label = QLabel("→")
         layout.addWidget(arrow_label)
 
-        self.replacement_edit = QLineEdit(match.replacement)
+        self.replacement_edit = QLineEdit(initial_replacement)
         self.replacement_edit.setFixedWidth(140)
         layout.addWidget(self.replacement_edit)
 
         self.include_checkbox.toggled.connect(self._update_enabled_state)
-        self._update_enabled_state(match.include)
+        self._update_enabled_state(initial_include)
 
     def _update_enabled_state(self, checked: bool) -> None:
         self.replacement_edit.setEnabled(checked)
@@ -79,10 +82,16 @@ class _MatchRow(QFrame):
 
 
 class ReviewDialog(QDialog):
-    def __init__(self, matches: list[Match], parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        matches: list[Match],
+        prior_decisions: dict[int, EditDecision] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent)
         self.setWindowTitle("Review flagged words")
         self.resize(760, 560)
+        prior_decisions = prior_decisions or {}
 
         layout = QVBoxLayout(self)
 
@@ -104,7 +113,7 @@ class ReviewDialog(QDialog):
 
             self._rows: list[_MatchRow] = []
             for match in matches:
-                row = _MatchRow(match)
+                row = _MatchRow(match, prior=prior_decisions.get(match.word_index))
                 self._rows.append(row)
                 content_layout.addWidget(row)
 

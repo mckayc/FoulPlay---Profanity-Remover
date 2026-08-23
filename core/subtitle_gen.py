@@ -1,11 +1,9 @@
-"""Builds subtitle files from the transcript + confirmed edit decisions.
+"""Builds the three subtitle tracks that always accompany a cleaned video:
 
-Produces:
-  * a "clean" subtitle track with replacement words substituted in place
-    of the filtered words, for normal viewing with subtitles on
-  * an optional "forced" track containing only the edited lines (word-only
-    or full-sentence, per settings) so the edit is visible even to viewers
-    who don't have subtitles enabled
+  1. Unedited -- the full transcript verbatim, no substitutions (build_unedited_subtitles)
+  2. Substituted -- normal subtitles with replacement words swapped in throughout (build_clean_subtitles)
+  3. Substitute-only -- hidden except during edited lines, so the edit is
+     visible even to a viewer with subtitles off (build_forced_subtitles)
 """
 
 from __future__ import annotations
@@ -19,6 +17,13 @@ from settings.config import SubtitleTextMode
 
 def _seconds_to_ms(seconds: float) -> int:
     return int(round(seconds * 1000))
+
+
+def build_unedited_subtitles(transcript: Transcript) -> pysubs2.SSAFile:
+    """The full transcript verbatim -- no words replaced -- so the original
+    dialogue can always be checked against what got changed.
+    """
+    return build_clean_subtitles(transcript, edits=[])
 
 
 def build_clean_subtitles(transcript: Transcript, edits: list[EditDecision]) -> pysubs2.SSAFile:

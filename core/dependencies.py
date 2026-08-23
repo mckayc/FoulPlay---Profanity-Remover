@@ -10,12 +10,15 @@ for the detected hardware.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_runtime_python, is_runtime_ready
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -93,7 +96,9 @@ def is_installed(group: DependencyGroup) -> bool:
         [get_runtime_python(), "-c", f"import {group.import_name}"],
         capture_output=True,
     )
-    return result.returncode == 0
+    installed = result.returncode == 0
+    logger.debug("Dependency group '%s' installed=%s", group.key, installed)
+    return installed
 
 
 def missing_groups(keys: Iterable[str]) -> list[DependencyGroup]:
@@ -107,6 +112,7 @@ def install_group(group: DependencyGroup, on_output: Callable[[str], None] | Non
     if group.extra_index_url:
         cmd += ["--extra-index-url", group.extra_index_url]
 
+    logger.info("Installing dependency group '%s': %s", group.key, " ".join(cmd))
     process = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -116,9 +122,13 @@ def install_group(group: DependencyGroup, on_output: Callable[[str], None] | Non
     )
     assert process.stdout is not None
     for line in process.stdout:
+        line = line.rstrip()
+        logger.debug("[pip:%s] %s", group.key, line)
         if on_output:
-            on_output(line.rstrip())
+            on_output(line)
     process.wait()
 
     if process.returncode != 0:
+        logger.error("Install of '%s' failed with exit code %s", group.key, process.returncode)
         raise RuntimeError(f"Failed to install '{group.label}' (pip exit code {process.returncode}).")
+    logger.info("Dependency group '%s' installed successfully", group.key)

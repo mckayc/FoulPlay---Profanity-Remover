@@ -8,10 +8,13 @@ already have it or can get it with a one-line winget/choco install.
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 FFMPEG_INSTALL_HINT = (
     "FFmpeg was not found on your system PATH. Install it, e.g. with "
@@ -26,6 +29,7 @@ class FfmpegNotFoundError(RuntimeError):
 def require_tool(name: str) -> str:
     path = shutil.which(name)
     if not path:
+        logger.error("Required tool '%s' not found on PATH", name)
         raise FfmpegNotFoundError(FFMPEG_INSTALL_HINT)
     return path
 
@@ -44,6 +48,7 @@ class MediaProbe:
 
 def probe(path: Path) -> MediaProbe:
     ffprobe = require_tool("ffprobe")
+    logger.info("Probing media file: %s", path)
     result = subprocess.run(
         [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", str(path)],
         capture_output=True,
@@ -52,34 +57,44 @@ def probe(path: Path) -> MediaProbe:
     )
     data = json.loads(result.stdout)
     streams = data.get("streams", [])
-    return MediaProbe(
+    media_probe = MediaProbe(
         duration_seconds=float(data.get("format", {}).get("duration", 0.0) or 0.0),
         audio_streams=[s for s in streams if s.get("codec_type") == "audio"],
         subtitle_streams=[s for s in streams if s.get("codec_type") == "subtitle"],
         video_streams=[s for s in streams if s.get("codec_type") == "video"],
     )
+    logger.info(
+        "Probe result: duration=%.1fs video=%d audio=%d subtitle=%d",
+        media_probe.duration_seconds,
+        len(media_probe.video_streams),
+        len(media_probe.audio_streams),
+        len(media_probe.subtitle_streams),
+    )
+    return media_probe
 
 
 def extract_audio(source: Path, dest_wav: Path, stream_index: int = 0) -> None:
     """Extract one audio stream as 16kHz mono PCM WAV (Whisper's expected input)."""
     ffmpeg = require_tool("ffmpeg")
     dest_wav.parent.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        [
-            ffmpeg,
-            "-y",
-            "-i",
-            str(source),
-            "-map",
-            f"0:a:{stream_index}",
-            "-ac",
-            "1",
-            "-ar",
-            "16000",
-            "-vn",
-            str(dest_wav),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(source),
+        "-map",
+        f"0:a:{stream_index}",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-vn",
+        str(dest_wav),
+    ]
+    logger.debug("Running: %s", " ".join(cmd))
+    try:
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        logger.error("ffmpeg audio extraction failed: %s\nstderr: %s", exc, exc.stderr)
+        raise
+    logger.info("Extracted audio stream %d from %s -> %s", stream_index, source, dest_wav)
