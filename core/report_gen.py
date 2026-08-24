@@ -13,8 +13,14 @@ from core.transcript import Transcript
 
 
 def _format_timestamp(seconds: float) -> str:
-    minutes, secs = divmod(seconds, 60)
-    return f"{int(minutes):02d}:{secs:05.2f}"
+    """H:MM:SS(.ss), matching how video players display elapsed time --
+    hours are only shown once the clip is long enough to need them, rather
+    than letting minutes run past 59 (e.g. "70:15" instead of "1:10:15")."""
+    total_minutes, secs = divmod(seconds, 60)
+    hours, minutes = divmod(int(total_minutes), 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:05.2f}"
+    return f"{minutes:02d}:{secs:05.2f}"
 
 
 def build_change_report(

@@ -33,6 +33,27 @@ def _match_format(segment: AudioSegment, reference: AudioSegment) -> AudioSegmen
     return segment
 
 
+# Fricatives (s, f, v, z, "sh", "th") and, to a lesser extent, "h" build up
+# gradually and quietly rather than starting sharply like a plosive or
+# vowel does. Whisper's word-start timestamps are derived from an
+# attention/alignment mechanism that tends to mark a word as "starting"
+# once its acoustic signature is clearly distinguishable -- for a
+# fricative, that point lands measurably after the sound has actually
+# begun, since the onset is quiet and noise-like rather than a sudden
+# spike. The practical effect: without extra lead-in, the first part of
+# words like "shit" or "stupid" audibly survives the mute. Order doesn't
+# matter here since every pattern gets the same extra padding.
+_SOFT_ONSET_PATTERNS = ("sh", "th", "s", "f", "v", "z", "h")
+_SOFT_ONSET_EXTRA_MS = 80
+
+
+def _extra_lead_in_ms(word_text: str) -> int:
+    normalized = word_text.strip().lower().lstrip("\"'([{-")
+    if any(normalized.startswith(pattern) for pattern in _SOFT_ONSET_PATTERNS):
+        return _SOFT_ONSET_EXTRA_MS
+    return 0
+
+
 def _contiguous_runs(indices: set[int]) -> list[tuple[int, int]]:
     """Groups a set of word indices into (start, end_inclusive) runs of
     consecutive indices, so adjacent excluded words are muted as one
@@ -87,7 +108,8 @@ def edit_vocals(
     for start_index, end_index in windows:
         start_word = transcript.words[start_index]
         end_word = transcript.words[end_index]
-        start_ms = max(int(start_word.start * 1000) - pad_before_ms, 0)
+        extra_lead_in = _extra_lead_in_ms(start_word.text)
+        start_ms = max(int(start_word.start * 1000) - pad_before_ms - extra_lead_in, 0)
         end_ms = min(int(end_word.end * 1000) + pad_after_ms, len(audio))
         if end_ms <= start_ms:
             continue
@@ -107,12 +129,13 @@ def edit_vocals(
         audio = audio[:start_ms] + replacement + audio[end_ms:]
         muted_text = " ".join(w.text for w in transcript.words[start_index : end_index + 1])
         logger.debug(
-            "Muted word(s) #%d-%d '%s' [%.2fs-%.2fs]",
+            "Muted word(s) #%d-%d '%s' [%.2fs-%.2fs] (extra_lead_in=%dms)",
             start_index,
             end_index,
             muted_text,
             start_word.start,
             end_word.end,
+            extra_lead_in,
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
