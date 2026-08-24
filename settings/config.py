@@ -41,10 +41,26 @@ class SubtitleTextMode(str, Enum):
     FULL_SENTENCE = "full_sentence"
 
 
+# Severity tiers, loosely following common content-rating conventions, so a
+# whole tier can be toggled at once (e.g. leave "mild" alone for older kids
+# but still filter "strong"). "custom" is the default bucket for words the
+# user adds themselves.
+WORD_CATEGORIES = ["mild", "moderate", "strong", "religious", "sexual", "custom"]
+WORD_CATEGORY_LABELS = {
+    "mild": "Mild",
+    "moderate": "Moderate",
+    "strong": "Strong",
+    "religious": "Religious",
+    "sexual": "Sexual",
+    "custom": "Custom (your additions)",
+}
+
+
 class WordEntry(BaseModel):
     word: str
     replacements: list[str] = Field(default_factory=list)
     enabled: bool = True
+    category: str = "custom"
 
 
 class AudioEditSettings(BaseModel):
@@ -92,6 +108,10 @@ def _load_default_wordlist() -> list[WordEntry]:
     with open(_DEFAULT_WORDLIST_PATH, "r", encoding="utf-8") as f:
         data = json.load(f)
     return [WordEntry(**entry) for entry in data["words"]]
+
+
+def get_default_settings() -> AppSettings:
+    return AppSettings(words=_load_default_wordlist())
 
 
 def load_settings() -> AppSettings:

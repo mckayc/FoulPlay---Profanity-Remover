@@ -21,6 +21,7 @@ a = Analysis(
     binaries=[],
     datas=[
         (str(repo_root / "data" / "default_wordlist.json"), "data"),
+        (str(repo_root / "data" / "icon.ico"), "data"),
         (str(repo_root / "packaging" / "runtime_template"), "runtime_template"),
     ],
     hiddenimports=[],
@@ -44,6 +45,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=str(repo_root / "packaging" / "icon.ico"),
 )
 
 coll = COLLECT(

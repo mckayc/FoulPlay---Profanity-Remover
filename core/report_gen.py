@@ -17,11 +17,15 @@ def _format_timestamp(seconds: float) -> str:
     return f"{int(minutes):02d}:{secs:05.2f}"
 
 
-def _highlighted_sentence(sentence_text: str, word_text: str) -> str:
-    upper = word_text.strip().rstrip(".,!?;:")
+def _highlighted_sentence(sentence_text: str, phrase_text: str) -> str:
+    upper = phrase_text.strip().rstrip(".,!?;:")
     if not upper:
         return sentence_text
-    return sentence_text.replace(word_text, word_text.upper(), 1) if word_text in sentence_text else sentence_text
+    return (
+        sentence_text.replace(phrase_text, phrase_text.upper(), 1)
+        if phrase_text in sentence_text
+        else sentence_text
+    )
 
 
 def build_change_report(
@@ -45,12 +49,15 @@ def build_change_report(
         return "\n".join(lines)
 
     for edit in included:
-        word = transcript.words[edit.word_index]
-        sentence = transcript.sentence_by_id(word.sentence_id)
-        context = _highlighted_sentence(sentence.text, word.text) if sentence else "(unknown context)"
+        span_words = transcript.words[edit.word_index : edit.word_index + edit.word_span]
+        start_word = span_words[0]
+        end_word = span_words[-1]
+        phrase_text = " ".join(w.text for w in span_words)
+        sentence = transcript.sentence_by_id(start_word.sentence_id)
+        context = _highlighted_sentence(sentence.text, phrase_text) if sentence else "(unknown context)"
         lines.append(
-            f"{_format_timestamp(word.start)} - {_format_timestamp(word.end)}  "
-            f'"{word.text}" -> "{edit.replacement}"'
+            f"{_format_timestamp(start_word.start)} - {_format_timestamp(end_word.end)}  "
+            f'"{phrase_text}" -> "{edit.replacement}"'
         )
         lines.append(f"  Context: {context}")
         lines.append("")

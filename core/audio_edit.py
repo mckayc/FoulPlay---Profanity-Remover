@@ -57,9 +57,10 @@ def edit_vocals(
     )
 
     for edit in included:
-        word = transcript.words[edit.word_index]
-        start_ms = max(int(word.start * 1000) - pad_before_ms, 0)
-        end_ms = min(int(word.end * 1000) + pad_after_ms, len(audio))
+        start_word = transcript.words[edit.word_index]
+        end_word = transcript.words[edit.word_index + edit.word_span - 1]
+        start_ms = max(int(start_word.start * 1000) - pad_before_ms, 0)
+        end_ms = min(int(end_word.end * 1000) + pad_after_ms, len(audio))
         if end_ms <= start_ms:
             continue
 
@@ -76,12 +77,15 @@ def edit_vocals(
 
         replacement = _apply_fade_envelope(replacement, fade_ms)
         audio = audio[:start_ms] + replacement + audio[end_ms:]
+        phrase_text = " ".join(
+            w.text for w in transcript.words[edit.word_index : edit.word_index + edit.word_span]
+        )
         logger.debug(
-            "Edited word #%d '%s' [%.2fs-%.2fs] -> '%s'",
+            "Edited word(s) #%d '%s' [%.2fs-%.2fs] -> '%s'",
             edit.word_index,
-            word.text,
-            word.start,
-            word.end,
+            phrase_text,
+            start_word.start,
+            end_word.end,
             edit.replacement,
         )
 

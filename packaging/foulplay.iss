@@ -18,6 +18,7 @@ AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\{#MyAppName}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+SetupIconFile=icon.ico
 OutputDir=..\dist_installer
 OutputBaseFilename=FoulPlay-Setup
 Compression=lzma2

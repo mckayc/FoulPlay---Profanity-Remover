@@ -77,6 +77,7 @@ class _MatchRow(QFrame):
             word_index=self.match.word_index,
             include=self.include_checkbox.isChecked(),
             replacement=self.replacement_edit.text().strip() or self.match.proposed_replacement,
+            word_span=self.match.word_span,
         )
 
 

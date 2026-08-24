@@ -7,10 +7,11 @@ from __future__ import annotations
 
 import logging
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
     QGroupBox,
@@ -43,6 +44,13 @@ from .transcribe_dialog import TranscribePage
 logger = logging.getLogger(__name__)
 
 _ERROR_LOG_HINT = "\n\nIf this keeps happening, use the \"Copy Log\" button to grab diagnostic details."
+
+
+def _resolve_icon_path() -> Path:
+    if getattr(sys, "frozen", False):
+        base = Path(getattr(sys, "_MEIPASS", "."))
+        return base / "data" / "icon.ico"
+    return Path(__file__).resolve().parent.parent / "data" / "icon.ico"
 
 
 class HomePage(QWidget):
@@ -134,6 +142,10 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("FoulPlay - Profanity Remover")
         self.resize(780, 600)
+
+        icon_path = _resolve_icon_path()
+        if icon_path.exists():
+            self.setWindowIcon(QIcon(str(icon_path)))
 
         self.settings = load_settings()
 

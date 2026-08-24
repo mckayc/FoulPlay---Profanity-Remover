@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -13,14 +12,12 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
-    QHeaderView,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPushButton,
+    QScrollArea,
     QSpinBox,
-    QTableWidget,
-    QTableWidgetItem,
     QTabWidget,
     QVBoxLayout,
     QWidget,
@@ -28,6 +25,8 @@ from PySide6.QtWidgets import (
 
 from settings.config import (
     WHISPER_MODEL_SIZES,
+    WORD_CATEGORIES,
+    WORD_CATEGORY_LABELS,
     AppSettings,
     AudioEditMode,
     SubtitleTextMode,
@@ -35,77 +34,162 @@ from settings.config import (
     save_settings,
 )
 
-WORD_COL, REPLACEMENTS_COL, ENABLED_COL = 0, 1, 2
+
+class _WordRow(QWidget):
+    removed = Signal(object)  # emits self
+
+    def __init__(self, entry: WordEntry, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 2, 0, 2)
+
+        self.enabled_checkbox = QCheckBox()
+        self.enabled_checkbox.setChecked(entry.enabled)
+        self.enabled_checkbox.setToolTip("Include this word")
+        layout.addWidget(self.enabled_checkbox)
+
+        self.word_edit = QLineEdit(entry.word)
+        self.word_edit.setPlaceholderText("word or phrase")
+        layout.addWidget(self.word_edit, 1)
+
+        self.replacements_edit = QLineEdit(", ".join(entry.replacements))
+        self.replacements_edit.setPlaceholderText("replacement(s), comma-separated")
+        layout.addWidget(self.replacements_edit, 1)
+
+        remove_button = QPushButton("✕")
+        remove_button.setFixedWidth(28)
+        remove_button.setToolTip("Remove this word")
+        remove_button.clicked.connect(lambda: self.removed.emit(self))
+        layout.addWidget(remove_button)
+
+    def to_entry(self, category: str) -> WordEntry | None:
+        word = self.word_edit.text().strip()
+        if not word:
+            return None
+        replacements = [r.strip() for r in self.replacements_edit.text().split(",") if r.strip()]
+        return WordEntry(
+            word=word,
+            replacements=replacements,
+            enabled=self.enabled_checkbox.isChecked(),
+            category=category,
+        )
+
+
+class _CategorySection(QGroupBox):
+    def __init__(self, category: str, entries: list[WordEntry], parent: QWidget | None = None) -> None:
+        label = WORD_CATEGORY_LABELS.get(category, category.title())
+        super().__init__(label, parent)
+        self.category = category
+        self._rows: list[_WordRow] = []
+
+        layout = QVBoxLayout(self)
+
+        self.toggle_all_checkbox = QCheckBox(f'Enable all "{label}" words')
+        self.toggle_all_checkbox.setChecked(all(e.enabled for e in entries) if entries else True)
+        self.toggle_all_checkbox.toggled.connect(self._apply_toggle_all)
+        layout.addWidget(self.toggle_all_checkbox)
+
+        self._rows_container = QWidget()
+        self._rows_layout = QVBoxLayout(self._rows_container)
+        self._rows_layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._rows_container)
+
+        for entry in entries:
+            self._add_row(entry)
+
+    def _add_row(self, entry: WordEntry) -> None:
+        row = _WordRow(entry)
+        row.removed.connect(self._remove_row)
+        self._rows.append(row)
+        self._rows_layout.addWidget(row)
+
+    def add_new_word(self, word: str, replacements: list[str]) -> None:
+        self._add_row(WordEntry(word=word, replacements=replacements, enabled=True, category=self.category))
+
+    def _remove_row(self, row: _WordRow) -> None:
+        self._rows.remove(row)
+        row.setParent(None)
+        row.deleteLater()
+
+    def _apply_toggle_all(self, checked: bool) -> None:
+        for row in self._rows:
+            row.enabled_checkbox.setChecked(checked)
+
+    def collect(self) -> list[WordEntry]:
+        entries = []
+        for row in self._rows:
+            entry = row.to_entry(self.category)
+            if entry is not None:
+                entries.append(entry)
+        return entries
 
 
 class WordListTab(QWidget):
     def __init__(self, settings: AppSettings, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._settings = settings
 
         layout = QVBoxLayout(self)
 
         info = QLabel(
-            "Words to filter. Separate multiple replacement options with a comma -- "
-            "one will be chosen at random each time the word is replaced."
+            "Words or phrases to filter, grouped by severity -- e.g. \"fuck\" or \"oh my god\". "
+            "Uncheck a category's header to disable all its words at once, or toggle/edit "
+            "individual entries below. Separate multiple replacement options with a comma -- "
+            "one is chosen at random each time."
         )
         info.setWordWrap(True)
         layout.addWidget(info)
 
-        self.table = QTableWidget(0, 3, self)
-        self.table.setHorizontalHeaderLabels(["Word", "Replacement(s)", "Enabled"])
-        self.table.horizontalHeader().setSectionResizeMode(WORD_COL, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.horizontalHeader().setSectionResizeMode(REPLACEMENTS_COL, QHeaderView.ResizeMode.Stretch)
-        self.table.horizontalHeader().setSectionResizeMode(ENABLED_COL, QHeaderView.ResizeMode.ResizeToContents)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        layout.addWidget(self.table)
-
-        self._populate()
-
-        button_row = QHBoxLayout()
+        add_row = QHBoxLayout()
+        self.new_word_edit = QLineEdit()
+        self.new_word_edit.setPlaceholderText("New word or phrase")
+        add_row.addWidget(self.new_word_edit, 1)
+        self.new_replacements_edit = QLineEdit()
+        self.new_replacements_edit.setPlaceholderText("Replacement(s), comma-separated")
+        add_row.addWidget(self.new_replacements_edit, 1)
+        self.new_category_combo = QComboBox()
+        for category in WORD_CATEGORIES:
+            self.new_category_combo.addItem(WORD_CATEGORY_LABELS[category], category)
+        self.new_category_combo.setCurrentIndex(WORD_CATEGORIES.index("custom"))
+        add_row.addWidget(self.new_category_combo)
         add_button = QPushButton("Add word")
-        add_button.clicked.connect(self._add_row)
-        remove_button = QPushButton("Remove selected")
-        remove_button.clicked.connect(self._remove_selected)
-        button_row.addWidget(add_button)
-        button_row.addWidget(remove_button)
-        button_row.addStretch(1)
-        layout.addLayout(button_row)
+        add_button.clicked.connect(self._add_word)
+        add_row.addWidget(add_button)
+        layout.addLayout(add_row)
 
-    def _populate(self) -> None:
-        self.table.setRowCount(0)
-        for entry in self._settings.words:
-            self._append_row(entry.word, ", ".join(entry.replacements), entry.enabled)
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        content = QWidget()
+        sections_layout = QVBoxLayout(content)
+        sections_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
 
-    def _append_row(self, word: str, replacements: str, enabled: bool) -> None:
-        row = self.table.rowCount()
-        self.table.insertRow(row)
-        self.table.setItem(row, WORD_COL, QTableWidgetItem(word))
-        self.table.setItem(row, REPLACEMENTS_COL, QTableWidgetItem(replacements))
-        enabled_item = QTableWidgetItem()
-        enabled_item.setFlags(enabled_item.flags() | Qt.ItemFlag.ItemIsUserCheckable)
-        enabled_item.setCheckState(Qt.CheckState.Checked if enabled else Qt.CheckState.Unchecked)
-        self.table.setItem(row, ENABLED_COL, enabled_item)
+        grouped: dict[str, list[WordEntry]] = {category: [] for category in WORD_CATEGORIES}
+        for entry in settings.words:
+            grouped.setdefault(entry.category, [])
+            grouped[entry.category].append(entry)
 
-    def _add_row(self) -> None:
-        self._append_row("", "", True)
-        self.table.setCurrentCell(self.table.rowCount() - 1, WORD_COL)
+        self._sections: dict[str, _CategorySection] = {}
+        ordered_categories = list(WORD_CATEGORIES) + [c for c in grouped if c not in WORD_CATEGORIES]
+        for category in ordered_categories:
+            section = _CategorySection(category, grouped.get(category, []))
+            self._sections[category] = section
+            sections_layout.addWidget(section)
 
-    def _remove_selected(self) -> None:
-        rows = sorted({index.row() for index in self.table.selectedIndexes()}, reverse=True)
-        for row in rows:
-            self.table.removeRow(row)
+    def _add_word(self) -> None:
+        word = self.new_word_edit.text().strip()
+        if not word:
+            return
+        replacements = [r.strip() for r in self.new_replacements_edit.text().split(",") if r.strip()]
+        category = self.new_category_combo.currentData()
+        self._sections[category].add_new_word(word, replacements)
+        self.new_word_edit.clear()
+        self.new_replacements_edit.clear()
 
     def collect(self) -> list[WordEntry]:
         entries: list[WordEntry] = []
-        for row in range(self.table.rowCount()):
-            word = self.table.item(row, WORD_COL).text().strip()
-            if not word:
-                continue
-            replacements_text = self.table.item(row, REPLACEMENTS_COL).text().strip()
-            replacements = [r.strip() for r in replacements_text.split(",") if r.strip()]
-            enabled = self.table.item(row, ENABLED_COL).checkState() == Qt.CheckState.Checked
-            entries.append(WordEntry(word=word, replacements=replacements, enabled=enabled))
+        for section in self._sections.values():
+            entries.extend(section.collect())
         return entries
 
 
@@ -262,23 +346,52 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
 
-        tabs = QTabWidget()
+        self.tabs = QTabWidget()
+        layout.addWidget(self.tabs)
+        self._build_tabs(settings)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.RestoreDefaults
+            | QDialogButtonBox.StandardButton.Save
+            | QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.button(QDialogButtonBox.StandardButton.RestoreDefaults).clicked.connect(self._reset_to_defaults)
+        buttons.accepted.connect(self._on_save)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+    def _build_tabs(self, settings: AppSettings) -> None:
         self.word_tab = WordListTab(settings)
         self.audio_tab = AudioEditTab(settings)
         self.subtitle_tab = SubtitleTab(settings)
         self.transcription_tab = TranscriptionTab(settings)
-        tabs.addTab(self.word_tab, "Word List")
-        tabs.addTab(self.audio_tab, "Audio Edit")
-        tabs.addTab(self.subtitle_tab, "Subtitles")
-        tabs.addTab(self.transcription_tab, "Transcription")
-        layout.addWidget(tabs)
+        self.tabs.addTab(self.word_tab, "Word List")
+        self.tabs.addTab(self.audio_tab, "Audio Edit")
+        self.tabs.addTab(self.subtitle_tab, "Subtitles")
+        self.tabs.addTab(self.transcription_tab, "Transcription")
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | QDialogButtonBox.StandardButton.Cancel
+    def _reset_to_defaults(self) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Restore defaults",
+            "This discards your word list and all other customizations here, replacing them "
+            "with FoulPlay's defaults. Nothing is saved until you click Save, so you can still "
+            "Cancel out of this if you change your mind.\n\nRestore defaults now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
         )
-        buttons.accepted.connect(self._on_save)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        from settings.config import get_default_settings
+
+        defaults = get_default_settings()
+        current_index = self.tabs.currentIndex()
+        while self.tabs.count():
+            widget = self.tabs.widget(0)
+            self.tabs.removeTab(0)
+            widget.deleteLater()
+        self._build_tabs(defaults)
+        self.tabs.setCurrentIndex(current_index)
 
     def _on_save(self) -> None:
         self._settings.words = self.word_tab.collect()

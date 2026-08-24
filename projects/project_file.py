@@ -16,9 +16,10 @@ FORMAT_VERSION = 2
 
 @dataclass
 class EditDecision:
-    word_index: int  # index into transcript.words
+    word_index: int  # index of the first word in transcript.words
     include: bool
     replacement: str
+    word_span: int = 1  # number of consecutive words this edit covers (>1 for phrase matches)
 
 
 @dataclass
