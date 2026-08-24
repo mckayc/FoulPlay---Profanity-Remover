@@ -57,13 +57,6 @@ class Match:
     sentence: Sentence
     matched_term: str  # normalized word, or space-joined normalized phrase
     proposed_replacement: str
-    occurrence_in_sentence: int  # nth occurrence (0-based) of matched_term within the sentence
-    include: bool = True
-    override_replacement: str | None = None
-
-    @property
-    def replacement(self) -> str:
-        return self.override_replacement if self.override_replacement is not None else self.proposed_replacement
 
 
 def _entry_tokens(entry: WordEntry) -> list[str]:
@@ -85,7 +78,6 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
 
     words = transcript.words
     n = len(words)
-    occurrence_counts: dict[tuple[int, str], int] = {}
     matches: list[Match] = []
 
     i = 0
@@ -130,10 +122,6 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
             i += 1
             continue
 
-        key = (word.sentence_id, matched_phrase)
-        occurrence = occurrence_counts.get(key, 0)
-        occurrence_counts[key] = occurrence + 1
-
         replacement_pool = matched_entry.replacements or [matched_entry.word]
         proposed = random.choice(replacement_pool)
 
@@ -145,7 +133,6 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
                 sentence=sentence,
                 matched_term=matched_phrase,
                 proposed_replacement=proposed,
-                occurrence_in_sentence=occurrence,
             )
         )
 
@@ -157,25 +144,3 @@ def find_matches(transcript: Transcript, word_entries: list[WordEntry]) -> list[
         len(candidates),
     )
     return matches
-
-
-def find_highlight_span(sentence_text: str, matched_term: str, occurrence_index: int) -> tuple[int, int] | None:
-    """Locate the character span of the nth occurrence of matched_term (a
-    single word or a space-joined phrase) as whole word(s).
-    """
-    tokens = matched_term.split(" ")
-    token_patterns = [r"\b" + re.escape(t) + r"\w*" for t in tokens]
-    pattern = re.compile(r"[^\w]+".join(token_patterns), re.IGNORECASE)
-
-    count = 0
-    for m in pattern.finditer(sentence_text):
-        # Split like normalize_word does (word chars + apostrophes are kept
-        # together, e.g. "god's" stays one token) so this check doesn't
-        # spuriously split contractions into two tokens and reject a
-        # correct match.
-        matched_tokens = [normalize_word(t) for t in re.split(r"[^\w']+", m.group()) if t]
-        if " ".join(matched_tokens) == matched_term:
-            if count == occurrence_index:
-                return m.span()
-            count += 1
-    return None

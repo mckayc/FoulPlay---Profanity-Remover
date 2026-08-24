@@ -15,8 +15,8 @@ from core import media, mux, subtitle_gen
 from core.audio_edit import edit_vocals, remix
 from core.audio_isolate import separate_dialogue
 from core.report_gen import save_change_report
+from core.sentence_edit import SentenceEdit
 from core.transcript import Transcript
-from projects.project_file import EditDecision
 from settings.config import AppSettings
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ class _ProcessWorker(QThread):
         self,
         video_path: Path,
         transcript: Transcript,
-        edits: list[EditDecision],
+        sentence_edits: dict[int, SentenceEdit],
         settings: AppSettings,
         workdir: Path,
         output_path: Path,
@@ -42,7 +42,7 @@ class _ProcessWorker(QThread):
         super().__init__()
         self._video_path = video_path
         self._transcript = transcript
-        self._edits = edits
+        self._sentence_edits = sentence_edits
         self._settings = settings
         self._workdir = workdir
         self._output_path = output_path
@@ -74,7 +74,7 @@ class _ProcessWorker(QThread):
             self.progress.emit(60)
             edited_vocals_path = self._workdir / "edited_vocals.wav"
             edit_vocals(
-                vocals, self._transcript, self._edits, self._settings.audio_edit, edited_vocals_path
+                vocals, self._transcript, self._sentence_edits, self._settings.audio_edit, edited_vocals_path
             )
 
             self.status.emit("Remixing dialogue with music/effects...")
@@ -88,12 +88,12 @@ class _ProcessWorker(QThread):
             unedited_srt_path = self._workdir / "unedited.srt"
             unedited_subs.save(str(unedited_srt_path))
 
-            clean_subs = subtitle_gen.build_clean_subtitles(self._transcript, self._edits)
+            clean_subs = subtitle_gen.build_clean_subtitles(self._transcript, self._sentence_edits)
             clean_srt_path = self._workdir / "clean.srt"
             clean_subs.save(str(clean_srt_path))
 
             forced_subs = subtitle_gen.build_forced_subtitles(
-                self._transcript, self._edits, self._settings.subtitles.forced_text_mode
+                self._transcript, self._sentence_edits, self._settings.subtitles.forced_text_mode
             )
             forced_srt_path = self._workdir / "forced.srt"
             forced_subs.save(str(forced_srt_path))
@@ -115,7 +115,7 @@ class _ProcessWorker(QThread):
             self.status.emit("Writing change report...")
             self.progress.emit(98)
             report_path = self._output_path.with_name(f"{self._output_path.stem} - Changes.txt")
-            save_change_report(self._video_path, self._transcript, self._edits, report_path)
+            save_change_report(self._video_path, self._transcript, self._sentence_edits, report_path)
 
             self.progress.emit(100)
             self.finished_ok.emit(self._output_path)
@@ -159,7 +159,7 @@ class ProcessPage(QWidget):
         self,
         video_path: Path,
         transcript: Transcript,
-        edits: list[EditDecision],
+        sentence_edits: dict[int, SentenceEdit],
         settings: AppSettings,
         workdir: Path,
         output_path: Path,
@@ -169,7 +169,7 @@ class ProcessPage(QWidget):
         self.status_label.setText("Starting...")
         self.progress_bar.setValue(0)
 
-        self._worker = _ProcessWorker(video_path, transcript, edits, settings, workdir, output_path)
+        self._worker = _ProcessWorker(video_path, transcript, sentence_edits, settings, workdir, output_path)
         self._worker.status.connect(self.status_label.setText)
         self._worker.progress.connect(self.progress_bar.setValue)
         self._worker.finished_ok.connect(self._on_success)

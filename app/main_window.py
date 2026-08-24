@@ -30,8 +30,9 @@ from core.dependencies import missing_groups
 from core.hardware import Accelerator, get_hardware_report
 from core.logging_setup import get_log_file_path, read_recent_log_text
 from core.profanity_matcher import find_matches
+from core.sentence_edit import SentenceEdit, build_default_sentence_edits
 from core.transcript import Transcript
-from projects.project_file import EditDecision, default_project_path, load_project, save_project
+from projects.project_file import default_project_path, load_project, save_project
 from settings.config import load_settings
 
 from .dependency_dialog import DependencyInstallDialog
@@ -153,7 +154,7 @@ class MainWindow(QMainWindow):
         # Process flow. Cleared on returning Home.
         self._video_path: Path | None = None
         self._transcript: Transcript | None = None
-        self._decisions: list[EditDecision] = []
+        self._sentence_edits: dict[int, SentenceEdit] = {}
         self._transcribe_workdir: str | None = None
         self._process_workdir: str | None = None
 
@@ -197,7 +198,7 @@ class MainWindow(QMainWindow):
         self._cleanup_workdirs()
         self._video_path = None
         self._transcript = None
-        self._decisions = []
+        self._sentence_edits = {}
         self.home_page.refresh_hardware_report()
         self.stack.setCurrentWidget(self.home_page)
 
@@ -302,36 +303,40 @@ class MainWindow(QMainWindow):
             return
 
         logger.info(
-            "Loaded project: %s (%d sentences, %d words, %d prior edit decisions)",
+            "Loaded project: %s (%d sentences, %d words, %d prior sentence edits)",
             project.source_video,
             len(project.transcript.sentences),
             len(project.transcript.words),
-            len(project.edits),
+            len(project.sentence_edits),
         )
         self._video_path = project.source_video
         self._transcript = project.transcript
-        prior_by_index = {e.word_index: e for e in project.edits}
-        self._start_review(prior_by_index)
+        self._start_review(project.sentence_edits)
 
     # ----- Review -----
 
-    def _start_review(self, prior_decisions: dict[int, EditDecision] | None = None) -> None:
+    def _start_review(self, prior_edits: dict[int, SentenceEdit] | None = None) -> None:
         assert self._transcript is not None
         matches = find_matches(self._transcript, self.settings.words)
-        self.review_page.set_matches(matches, prior_decisions)
+        default_edits = build_default_sentence_edits(self._transcript, matches)
+        self.review_page.set_sentence_edits(self._transcript, default_edits, prior_edits)
         self.stack.setCurrentWidget(self.review_page)
 
-    def _on_review_confirmed(self, decisions: list[EditDecision]) -> None:
+    def _on_review_confirmed(self, sentence_edits: dict[int, SentenceEdit]) -> None:
         assert self._video_path is not None
         assert self._transcript is not None
 
-        included_count = sum(1 for d in decisions if d.include)
-        logger.info("Review confirmed: %d of %d flagged word(s) included", included_count, len(decisions))
-        self._decisions = decisions
+        changed_count = sum(
+            1 for e in sentence_edits.values() if e.edit_enabled and (e.excluded_word_indices or e.custom_subtitle_text)
+        )
+        logger.info(
+            "Review confirmed: %d of %d sentence(s) have an active edit", changed_count, len(sentence_edits)
+        )
+        self._sentence_edits = sentence_edits
         project_path = default_project_path(self._video_path)
-        save_project(project_path, self._video_path, self._transcript, decisions)
+        save_project(project_path, self._video_path, self._transcript, sentence_edits)
 
-        if not any(d.include for d in decisions):
+        if changed_count == 0:
             QMessageBox.information(self, "Nothing to process", "No edits were confirmed; nothing to process.")
             self._go_home()
             return
@@ -361,7 +366,7 @@ class MainWindow(QMainWindow):
         self.process_page.start(
             self._video_path,
             self._transcript,
-            decisions,
+            sentence_edits,
             self.settings,
             Path(self._process_workdir),
             output_path,

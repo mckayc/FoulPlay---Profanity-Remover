@@ -1,6 +1,6 @@
-"""Applies per-word audio edits (silence/volume/beep) to the isolated vocal
-stem, with short fades at cut boundaries to avoid clicks, then remixes the
-edited vocals back with the accompaniment stem.
+"""Applies per-sentence audio edits (silence/volume/beep) to the isolated
+vocal stem, with short fades at cut boundaries to avoid clicks, then
+remixes the edited vocals back with the accompaniment stem.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from pathlib import Path
 from pydub import AudioSegment
 from pydub.generators import Sine
 
+from core.sentence_edit import SentenceEdit
 from core.transcript import Transcript
-from projects.project_file import EditDecision
 from settings.config import AudioEditMode, AudioEditSettings
 
 logger = logging.getLogger(__name__)
@@ -33,10 +33,33 @@ def _match_format(segment: AudioSegment, reference: AudioSegment) -> AudioSegmen
     return segment
 
 
+def _contiguous_runs(indices: set[int]) -> list[tuple[int, int]]:
+    """Groups a set of word indices into (start, end_inclusive) runs of
+    consecutive indices, so adjacent excluded words are muted as one
+    combined window instead of getting separate, potentially overlapping
+    fade/pad treatment.
+    """
+    if not indices:
+        return []
+    ordered = sorted(indices)
+    runs: list[tuple[int, int]] = []
+    run_start = ordered[0]
+    prev = ordered[0]
+    for idx in ordered[1:]:
+        if idx == prev + 1:
+            prev = idx
+            continue
+        runs.append((run_start, prev))
+        run_start = idx
+        prev = idx
+    runs.append((run_start, prev))
+    return runs
+
+
 def edit_vocals(
     vocals_path: Path,
     transcript: Transcript,
-    edits: list[EditDecision],
+    sentence_edits: dict[int, SentenceEdit],
     settings: AudioEditSettings,
     output_path: Path,
 ) -> Path:
@@ -45,20 +68,25 @@ def edit_vocals(
     pad_before_ms = int(settings.pad_before_ms)
     pad_after_ms = int(settings.pad_after_ms)
 
-    included = [e for e in edits if e.include]
-    included.sort(key=lambda e: transcript.words[e.word_index].start)
+    windows: list[tuple[int, int]] = []  # (start_word_index, end_word_index_inclusive)
+    for edit in sentence_edits.values():
+        if not edit.edit_enabled or not edit.excluded_word_indices:
+            continue
+        windows.extend(_contiguous_runs(edit.excluded_word_indices))
+    windows.sort(key=lambda run: transcript.words[run[0]].start)
+
     logger.info(
-        "Applying %d audio edit(s), mode=%s, pad_before=%dms, pad_after=%dms, fade=%dms",
-        len(included),
+        "Applying %d audio mute window(s), mode=%s, pad_before=%dms, pad_after=%dms, fade=%dms",
+        len(windows),
         settings.mode,
         pad_before_ms,
         pad_after_ms,
         fade_ms,
     )
 
-    for edit in included:
-        start_word = transcript.words[edit.word_index]
-        end_word = transcript.words[edit.word_index + edit.word_span - 1]
+    for start_index, end_index in windows:
+        start_word = transcript.words[start_index]
+        end_word = transcript.words[end_index]
         start_ms = max(int(start_word.start * 1000) - pad_before_ms, 0)
         end_ms = min(int(end_word.end * 1000) + pad_after_ms, len(audio))
         if end_ms <= start_ms:
@@ -77,16 +105,14 @@ def edit_vocals(
 
         replacement = _apply_fade_envelope(replacement, fade_ms)
         audio = audio[:start_ms] + replacement + audio[end_ms:]
-        phrase_text = " ".join(
-            w.text for w in transcript.words[edit.word_index : edit.word_index + edit.word_span]
-        )
+        muted_text = " ".join(w.text for w in transcript.words[start_index : end_index + 1])
         logger.debug(
-            "Edited word(s) #%d '%s' [%.2fs-%.2fs] -> '%s'",
-            edit.word_index,
-            phrase_text,
+            "Muted word(s) #%d-%d '%s' [%.2fs-%.2fs]",
+            start_index,
+            end_index,
+            muted_text,
             start_word.start,
             end_word.end,
-            edit.replacement,
         )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
