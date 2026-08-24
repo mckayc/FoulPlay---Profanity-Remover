@@ -14,6 +14,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from core import proc
+
 logger = logging.getLogger(__name__)
 
 FFMPEG_INSTALL_HINT = (
@@ -49,7 +51,7 @@ class MediaProbe:
 def probe(path: Path) -> MediaProbe:
     ffprobe = require_tool("ffprobe")
     logger.info("Probing media file: %s", path)
-    result = subprocess.run(
+    result = proc.run(
         [ffprobe, "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", str(path)],
         capture_output=True,
         text=True,
@@ -93,7 +95,7 @@ def extract_audio(source: Path, dest_wav: Path, stream_index: int = 0) -> None:
     ]
     logger.debug("Running: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        proc.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         logger.error("ffmpeg audio extraction failed: %s\nstderr: %s", exc, exc.stderr)
         raise

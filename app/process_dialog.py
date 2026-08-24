@@ -1,5 +1,6 @@
-"""Progress dialog for the processing stage: dialogue isolation, per-word
-audio edits, remix, subtitle generation, and final MKV mux.
+"""Processing page: dialogue isolation, per-word audio edits, remix,
+subtitle generation, and final MKV mux, with progress shown inline instead
+of in a separate window.
 """
 
 from __future__ import annotations
@@ -8,7 +9,7 @@ import logging
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QDialog, QLabel, QProgressBar, QPushButton, QVBoxLayout
+from PySide6.QtWidgets import QLabel, QProgressBar, QPushButton, QVBoxLayout, QWidget
 
 from core import media, mux, subtitle_gen
 from core.audio_edit import edit_vocals, remix
@@ -19,6 +20,8 @@ from projects.project_file import EditDecision
 from settings.config import AppSettings
 
 logger = logging.getLogger(__name__)
+
+_ISOLATION_RANGE = (15, 55)  # progress band mapped from Demucs's own 0-100%
 
 
 class _ProcessWorker(QThread):
@@ -52,10 +55,19 @@ class _ProcessWorker(QThread):
             media.extract_audio(self._video_path, audio_path)
 
             self.status.emit("Isolating dialogue from music/effects (this can take a while)...")
-            self.progress.emit(15)
+            self.progress.emit(_ISOLATION_RANGE[0])
             separated_dir = self._workdir / "separated"
+
+            def on_isolation_progress(percent: int) -> None:
+                low, high = _ISOLATION_RANGE
+                self.progress.emit(low + int((high - low) * percent / 100))
+
             vocals, accompaniment = separate_dialogue(
-                audio_path, separated_dir, prefer_gpu=self._settings.performance.prefer_gpu, on_output=None
+                audio_path,
+                separated_dir,
+                prefer_gpu=self._settings.performance.prefer_gpu,
+                on_output=None,
+                on_progress=on_isolation_progress,
             )
 
             self.status.emit("Editing flagged words...")
@@ -101,6 +113,7 @@ class _ProcessWorker(QThread):
             )
 
             self.status.emit("Writing change report...")
+            self.progress.emit(98)
             report_path = self._output_path.with_name(f"{self._output_path.stem} - Changes.txt")
             save_change_report(self._video_path, self._transcript, self._edits, report_path)
 
@@ -111,26 +124,23 @@ class _ProcessWorker(QThread):
             self.failed.emit(str(exc))
 
 
-class ProcessProgressDialog(QDialog):
-    def __init__(
-        self,
-        video_path: Path,
-        transcript: Transcript,
-        edits: list[EditDecision],
-        settings: AppSettings,
-        workdir: Path,
-        output_path: Path,
-        parent=None,
-    ) -> None:
-        super().__init__(parent)
-        self.setWindowTitle("Processing")
-        self.resize(460, 140)
-        self.setModal(True)
+class ProcessPage(QWidget):
+    finished_ok = Signal(object)  # output Path
+    failed = Signal(str)
+    cancelled = Signal()
 
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
         self.output_path: Path | None = None
         self.error: str | None = None
+        self._worker: _ProcessWorker | None = None
 
         layout = QVBoxLayout(self)
+        layout.addStretch(1)
+
+        title = QLabel("<h2>Processing</h2>")
+        layout.addWidget(title)
+
         self.status_label = QLabel("Starting...")
         self.status_label.setWordWrap(True)
         layout.addWidget(self.status_label)
@@ -140,22 +150,36 @@ class ProcessProgressDialog(QDialog):
         layout.addWidget(self.progress_bar)
 
         self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.reject)
+        self.cancel_button.clicked.connect(self.cancelled.emit)
         layout.addWidget(self.cancel_button)
+
+        layout.addStretch(2)
+
+    def start(
+        self,
+        video_path: Path,
+        transcript: Transcript,
+        edits: list[EditDecision],
+        settings: AppSettings,
+        workdir: Path,
+        output_path: Path,
+    ) -> None:
+        self.output_path = None
+        self.error = None
+        self.status_label.setText("Starting...")
+        self.progress_bar.setValue(0)
 
         self._worker = _ProcessWorker(video_path, transcript, edits, settings, workdir, output_path)
         self._worker.status.connect(self.status_label.setText)
         self._worker.progress.connect(self.progress_bar.setValue)
         self._worker.finished_ok.connect(self._on_success)
         self._worker.failed.connect(self._on_failure)
-
-    def start(self) -> None:
         self._worker.start()
 
     def _on_success(self, output_path: Path) -> None:
         self.output_path = output_path
-        self.accept()
+        self.finished_ok.emit(output_path)
 
     def _on_failure(self, message: str) -> None:
         self.error = message
-        self.reject()
+        self.failed.emit(message)

@@ -17,6 +17,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
+from core import proc
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_ml_worker_script, get_runtime_python
 from core.transcript import Sentence, Transcript, Word
@@ -92,7 +93,7 @@ def transcribe_audio(
             str(out_path),
         ]
         logger.debug("Running: %s", " ".join(cmd))
-        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        process = proc.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         assert process.stdout is not None
         for line in process.stdout:
             line = line.strip()

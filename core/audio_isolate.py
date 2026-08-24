@@ -8,16 +8,24 @@ and lets progress be streamed line-by-line from stdout.
 from __future__ import annotations
 
 import logging
+import re
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
+from core import proc
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_runtime_python
 
 logger = logging.getLogger(__name__)
 
 _MODEL_NAME = "htdemucs"
+
+# Demucs prints tqdm-style progress like "50%|####...   | 5.85/11.7 [...]".
+# subprocess text-mode universal-newline translation turns tqdm's \r-based
+# in-place updates into separate lines, so each percentage tick arrives as
+# its own line here.
+_PERCENT_RE = re.compile(r"^\s*(\d{1,3})%\|")
 
 
 class SeparationError(RuntimeError):
@@ -42,6 +50,7 @@ def separate_dialogue(
     output_dir: Path,
     prefer_gpu: bool = True,
     on_output: Callable[[str], None] | None = None,
+    on_progress: Callable[[int], None] | None = None,
 ) -> tuple[Path, Path]:
     """Runs Demucs two-stem separation. Returns (vocals_path, accompaniment_path)."""
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -63,13 +72,17 @@ def separate_dialogue(
         str(audio_wav),
     ]
     logger.info("Running Demucs separation: %s", " ".join(cmd))
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    process = proc.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     assert process.stdout is not None
     for line in process.stdout:
         line = line.rstrip()
         logger.debug("[demucs] %s", line)
         if on_output:
             on_output(line)
+        if on_progress:
+            match = _PERCENT_RE.match(line)
+            if match:
+                on_progress(min(int(match.group(1)), 100))
     process.wait()
 
     if process.returncode != 0:

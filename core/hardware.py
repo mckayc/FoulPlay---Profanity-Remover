@@ -20,6 +20,8 @@ import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 
+from core import proc
+
 logger = logging.getLogger(__name__)
 
 
@@ -56,7 +58,7 @@ class HardwareReport:
 def _detect_gpus_via_os() -> list[GpuInfo]:
     """Enumerate GPUs using PowerShell CIM, independent of torch."""
     try:
-        result = subprocess.run(
+        result = proc.run(
             [
                 "powershell",
                 "-NoProfile",

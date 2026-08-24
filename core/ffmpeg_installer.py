@@ -10,6 +10,8 @@ import shutil
 import subprocess
 from collections.abc import Callable
 
+from core import proc
+
 logger = logging.getLogger(__name__)
 
 WINGET_PACKAGE_ID = "Gyan.FFmpeg"
@@ -45,7 +47,7 @@ def install_ffmpeg_via_winget(on_output: Callable[[str], None] | None = None) ->
         "--accept-source-agreements",
     ]
     logger.info("Installing FFmpeg via winget: %s", " ".join(cmd))
-    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+    process = proc.popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
     assert process.stdout is not None
     for line in process.stdout:
         line = line.rstrip()

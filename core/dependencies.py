@@ -15,6 +15,7 @@ import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 
+from core import proc
 from core.hardware import Accelerator, get_hardware_report
 from core.runtime import ensure_runtime_ready, get_runtime_python, is_runtime_ready
 
@@ -92,7 +93,7 @@ def is_installed(group: DependencyGroup) -> bool:
     """
     if not is_runtime_ready():
         return False
-    result = subprocess.run(
+    result = proc.run(
         [get_runtime_python(), "-c", f"import {group.import_name}"],
         capture_output=True,
     )
@@ -113,7 +114,7 @@ def install_group(group: DependencyGroup, on_output: Callable[[str], None] | Non
         cmd += ["--extra-index-url", group.extra_index_url]
 
     logger.info("Installing dependency group '%s': %s", group.key, " ".join(cmd))
-    process = subprocess.Popen(
+    process = proc.popen(
         cmd,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,

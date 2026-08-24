@@ -1,4 +1,4 @@
-"""Review & Confirm screen.
+"""Review & Confirm page.
 
 Shows every flagged word in full sentence context so the user can judge
 how the word is being used, then include/exclude the edit and customize
@@ -9,15 +9,14 @@ from __future__ import annotations
 
 import html
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
-    QDialog,
-    QDialogButtonBox,
     QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QPushButton,
     QScrollArea,
     QVBoxLayout,
     QWidget,
@@ -43,7 +42,7 @@ class _MatchRow(QFrame):
     def __init__(self, match: Match, prior: EditDecision | None = None, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.match = match
-        self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setProperty("matchRow", True)
 
         initial_include = prior.include if prior is not None else match.include
         initial_replacement = prior.replacement if prior is not None else match.replacement
@@ -81,55 +80,68 @@ class _MatchRow(QFrame):
         )
 
 
-class ReviewDialog(QDialog):
-    def __init__(
-        self,
-        matches: list[Match],
-        prior_decisions: dict[int, EditDecision] | None = None,
-        parent: QWidget | None = None,
-    ) -> None:
+class ReviewPage(QWidget):
+    confirmed = Signal(list)  # list[EditDecision]
+    cancelled = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setWindowTitle("Review flagged words")
-        self.resize(760, 560)
-        prior_decisions = prior_decisions or {}
+        self._rows: list[_MatchRow] = []
 
         layout = QVBoxLayout(self)
 
+        title = QLabel("<h2>Review flagged words</h2>")
+        layout.addWidget(title)
+
+        self.info_label = QLabel("")
+        self.info_label.setWordWrap(True)
+        layout.addWidget(self.info_label)
+
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self._content = QWidget()
+        self._content_layout = QVBoxLayout(self._content)
+        self._content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.scroll.setWidget(self._content)
+        layout.addWidget(self.scroll, 1)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch(1)
+        cancel_button = QPushButton("Cancel")
+        cancel_button.clicked.connect(self.cancelled.emit)
+        button_row.addWidget(cancel_button)
+        confirm_button = QPushButton("Confirm")
+        confirm_button.setProperty("accent", True)
+        confirm_button.clicked.connect(self._on_confirm)
+        button_row.addWidget(confirm_button)
+        layout.addLayout(button_row)
+
+    def set_matches(
+        self,
+        matches: list[Match],
+        prior_decisions: dict[int, EditDecision] | None = None,
+    ) -> None:
+        prior_decisions = prior_decisions or {}
+
+        while self._content_layout.count():
+            item = self._content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+        self._rows = []
         if not matches:
-            layout.addWidget(QLabel("No words from your filter list were found in this video."))
-        else:
-            info = QLabel(
-                f"Found {len(matches)} word(s) matching your filter list. "
-                "Uncheck any you want to keep, or edit the replacement."
-            )
-            info.setWordWrap(True)
-            layout.addWidget(info)
+            self.info_label.setText("No words from your filter list were found in this video.")
+            return
 
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            content = QWidget()
-            content_layout = QVBoxLayout(content)
-            content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-
-            self._rows: list[_MatchRow] = []
-            for match in matches:
-                row = _MatchRow(match, prior=prior_decisions.get(match.word_index))
-                self._rows.append(row)
-                content_layout.addWidget(row)
-
-            scroll.setWidget(content)
-            layout.addWidget(scroll, 1)
-
-        if not matches:
-            self._rows = []
-
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        self.info_label.setText(
+            f"Found {len(matches)} word(s) matching your filter list. "
+            "Uncheck any you want to keep, or edit the replacement."
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Confirm")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        for match in matches:
+            row = _MatchRow(match, prior=prior_decisions.get(match.word_index))
+            self._rows.append(row)
+            self._content_layout.addWidget(row)
 
-    def collect_decisions(self) -> list[EditDecision]:
-        return [row.to_decision() for row in self._rows]
+    def _on_confirm(self) -> None:
+        self.confirmed.emit([row.to_decision() for row in self._rows])

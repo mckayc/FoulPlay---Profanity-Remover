@@ -17,8 +17,10 @@ def main() -> int:
     logger.info("FoulPlay starting (argv=%s)", sys.argv)
 
     from app.main_window import MainWindow  # imported after logging is set up
+    from app.style import STYLESHEET
 
     app = QApplication(sys.argv)
+    app.setStyleSheet(STYLESHEET)
     window = MainWindow()
     window.show()
     exit_code = app.exec()

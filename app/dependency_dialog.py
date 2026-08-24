@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QDialogButtonBox,
     QLabel,
     QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QVBoxLayout,
 )
@@ -73,6 +74,11 @@ class DependencyInstallDialog(QDialog):
             item.setWordWrap(True)
             layout.addWidget(item)
 
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # marquee/busy mode -- pip gives no real percentage
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.hide()
@@ -87,6 +93,7 @@ class DependencyInstallDialog(QDialog):
         layout.addWidget(self.buttons)
 
     def _start_install(self) -> None:
+        self.progress_bar.show()
         self.log.show()
         self.buttons.button(QDialogButtonBox.StandardButton.Ok).setEnabled(False)
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(False)
@@ -99,10 +106,12 @@ class DependencyInstallDialog(QDialog):
 
     def _on_success(self) -> None:
         self.succeeded = True
+        self.progress_bar.hide()
         self.log.appendPlainText("\nDone.")
         self.accept()
 
     def _on_failure(self, message: str) -> None:
+        self.progress_bar.hide()
         self.log.appendPlainText(f"\nInstall failed: {message}")
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setEnabled(True)
         self.buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Close")

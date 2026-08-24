@@ -10,6 +10,7 @@ import logging
 import subprocess
 from pathlib import Path
 
+from core import proc
 from core.media import require_tool
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def mux_final(
 
     logger.info("Muxing final file: %s", " ".join(cmd))
     try:
-        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        proc.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         logger.error("ffmpeg mux failed: %s\nstderr: %s", exc, exc.stderr)
         raise
