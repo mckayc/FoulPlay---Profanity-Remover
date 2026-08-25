@@ -88,6 +88,13 @@ class SentenceCard(QFrame):
 
         layout = QVBoxLayout(self)
 
+        previous_sentence = transcript.sentence_by_id(sentence_id - 1)
+        if previous_sentence is not None:
+            previous_label = QLabel(f"… {html.escape(previous_sentence.text)}")
+            previous_label.setProperty("muted", True)
+            previous_label.setWordWrap(True)
+            layout.addWidget(previous_label)
+
         header = QHBoxLayout()
         original_label = QLabel(f"<b>Original:</b> {html.escape(self.sentence.text)}")
         original_label.setWordWrap(True)
@@ -131,6 +138,13 @@ class SentenceCard(QFrame):
         columns.addLayout(subtitle_col, 1)
 
         layout.addLayout(columns)
+
+        next_sentence = transcript.sentence_by_id(sentence_id + 1)
+        if next_sentence is not None:
+            next_label = QLabel(f"{html.escape(next_sentence.text)} …")
+            next_label.setProperty("muted", True)
+            next_label.setWordWrap(True)
+            layout.addWidget(next_label)
 
         self._refresh()
 
