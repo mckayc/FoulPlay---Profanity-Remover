@@ -35,6 +35,11 @@ class SentenceEdit:
     # None = auto-generate from the current word selection; set once the
     # user types in the unmirrored Subtitle box.
     custom_subtitle_text: str | None = None
+    # Set when hybrid transcription's subtitle safety net suggested
+    # profanity here that the accurate re-pass still couldn't confirm --
+    # we deliberately don't auto-mute on unconfirmed evidence, so this
+    # just surfaces a "please check manually" banner in Review instead.
+    needs_verification: bool = False
 
     def flagged_word_indices(self) -> set[int]:
         indices: set[int] = set()
@@ -49,7 +54,12 @@ class SentenceEdit:
         return None
 
 
-def build_default_sentence_edits(transcript: Transcript, matches: list[Match]) -> dict[int, SentenceEdit]:
+def build_default_sentence_edits(
+    transcript: Transcript,
+    matches: list[Match],
+    needs_verification_ids: set[int] | None = None,
+) -> dict[int, SentenceEdit]:
+    needs_verification_ids = needs_verification_ids or set()
     by_sentence: dict[int, list[Match]] = {}
     for m in matches:
         by_sentence.setdefault(m.sentence.id, []).append(m)
@@ -66,7 +76,16 @@ def build_default_sentence_edits(transcript: Transcript, matches: list[Match]) -
             sentence_id=sentence_id,
             flagged_spans=spans,
             excluded_word_indices=excluded,
+            needs_verification=sentence_id in needs_verification_ids,
         )
+
+    # Sentences the subtitle safety net flagged but that have no confirmed
+    # match of their own still need a card -- with nothing pre-excluded,
+    # since we don't auto-mute on unconfirmed evidence.
+    for sentence_id in needs_verification_ids:
+        if sentence_id not in result:
+            result[sentence_id] = SentenceEdit(sentence_id=sentence_id, needs_verification=True)
+
     return result
 
 

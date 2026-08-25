@@ -13,6 +13,9 @@ SURFACE = "#FFFFFF"
 BORDER = "#DADEE5"
 TEXT = "#1E2126"
 TEXT_MUTED = "#5B6270"
+WARNING_BG = "#FFF4D6"
+WARNING_BORDER = "#E8B93A"
+WARNING_TEXT = "#7A5B00"
 
 STYLESHEET = f"""
 QWidget {{
@@ -32,6 +35,15 @@ QLabel {{
 
 QLabel[muted="true"] {{
     color: {TEXT_MUTED};
+}}
+
+QLabel[warning="true"] {{
+    background: {WARNING_BG};
+    border: 1px solid {WARNING_BORDER};
+    border-radius: 6px;
+    color: {WARNING_TEXT};
+    padding: 6px 10px;
+    font-weight: 600;
 }}
 
 QGroupBox {{

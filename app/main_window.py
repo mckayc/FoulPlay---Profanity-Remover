@@ -28,10 +28,12 @@ from PySide6.QtWidgets import (
 from core import media
 from core.dependencies import missing_groups
 from core.hardware import Accelerator, get_hardware_report
+from core.hybrid_transcribe import HybridStats
 from core.logging_setup import get_log_file_path, read_recent_log_text
 from core.profanity_matcher import find_matches
 from core.sentence_edit import SentenceEdit, build_default_sentence_edits
 from core.transcript import Transcript
+from core.version import APP_VERSION
 from projects.project_file import default_project_path, load_project, save_project
 from settings.config import load_settings
 
@@ -59,7 +61,10 @@ class HomePage(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
-        title = QLabel("<h2>FoulPlay</h2><p>Create a family-friendly audio &amp; subtitle track for your movies.</p>")
+        title = QLabel(
+            f"<h2>FoulPlay <span style='font-size:10pt; font-weight:normal; color:#5B6270;'>v{APP_VERSION}</span></h2>"
+            "<p>Create a family-friendly audio &amp; subtitle track for your movies.</p>"
+        )
         title.setWordWrap(True)
         layout.addWidget(title)
 
@@ -141,7 +146,7 @@ class DonePage(QWidget):
 class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("FoulPlay - Profanity Remover")
+        self.setWindowTitle(f"FoulPlay - Profanity Remover (v{APP_VERSION})")
         self.resize(780, 600)
 
         icon_path = _resolve_icon_path()
@@ -261,13 +266,89 @@ class MainWindow(QMainWindow):
 
         self._video_path = video_path
         self._transcribe_workdir = tempfile.mkdtemp(prefix="foulplay_")
+        subtitle_path = self._acquire_subtitle(video_path, Path(self._transcribe_workdir))
         self.stack.setCurrentWidget(self.transcribe_page)
-        self.transcribe_page.start(video_path, self.settings.performance, Path(self._transcribe_workdir))
+        self.transcribe_page.start(
+            video_path, subtitle_path, self.settings.performance, self.settings.words, Path(self._transcribe_workdir)
+        )
 
-    def _on_transcribed(self, transcript: Transcript) -> None:
+    def _acquire_subtitle(self, video_path: Path, workdir: Path) -> Path | None:
+        """Offers to use an available subtitle (embedded or sidecar) as a
+        safety net for hybrid transcription, or lets the user browse for
+        one. Purely additive -- declining or finding none falls back to
+        today's single-pass transcription."""
+        sidecar = media.find_sidecar_subtitle(video_path)
+        if sidecar is not None:
+            reply = QMessageBox.question(
+                self,
+                "Use subtitle file?",
+                f"Found a matching subtitle file:\n{sidecar.name}\n\n"
+                "Use it as a safety net to help catch profanity the fast transcription pass "
+                "might miss (e.g. from quiet dialogue or background noise)?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                logger.info("Using sidecar subtitle: %s", sidecar)
+                return sidecar
+
+        try:
+            probe = media.probe(video_path)
+        except Exception:  # noqa: BLE001
+            probe = None
+
+        if probe is not None and probe.subtitle_streams:
+            reply = QMessageBox.question(
+                self,
+                "Use embedded subtitle?",
+                "This video has an embedded subtitle track. Use it as a safety net to help catch "
+                "profanity the fast transcription pass might miss?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                extracted = workdir / "embedded_subtitle.srt"
+                try:
+                    media.extract_subtitle(video_path, extracted)
+                    logger.info("Using embedded subtitle extracted to: %s", extracted)
+                    return extracted
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("Failed to extract embedded subtitle: %s", exc)
+                    QMessageBox.warning(
+                        self, "Subtitle extraction failed", f"Could not extract the embedded subtitle:\n{exc}"
+                    )
+
+        reply = QMessageBox.question(
+            self,
+            "Browse for a subtitle file?",
+            "No subtitle was auto-detected. Browse for one to use as a safety net during "
+            "transcription? (Optional -- transcription works fine without one.)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        )
+        if reply == QMessageBox.StandardButton.Yes:
+            path_str, _ = QFileDialog.getOpenFileName(
+                self, "Select a subtitle file", "", "Subtitle files (*.srt *.ass *.vtt);;All files (*.*)"
+            )
+            if path_str:
+                logger.info("Using manually-selected subtitle: %s", path_str)
+                return Path(path_str)
+
+        return None
+
+    def _on_transcribed(self, transcript: Transcript, stats: HybridStats) -> None:
         self._bring_to_front()
         self._transcript = transcript
-        self._start_review()
+        self._start_review(needs_verification_ids=stats.needs_verification_ids, summary_note=self._build_summary_note(stats))
+
+    def _build_summary_note(self, stats: HybridStats) -> str | None:
+        if not stats.subtitle_used:
+            return None
+        if not stats.synced:
+            return "Subtitle safety net: could not reliably sync the subtitle to the video, so it wasn't used."
+        parts = [f"checked {stats.candidates_checked} subtitle-flagged spot(s) the baseline pass missed"]
+        if stats.confirmed_additional:
+            parts.append(f"confirmed {stats.confirmed_additional} additional word(s)")
+        if stats.needs_verification_ids:
+            parts.append(f"{len(stats.needs_verification_ids)} still need manual verification (see warnings below)")
+        return "Subtitle safety net: " + "; ".join(parts) + "."
 
     def _on_transcribe_failed(self, message: str) -> None:
         self._bring_to_front()
@@ -315,11 +396,16 @@ class MainWindow(QMainWindow):
 
     # ----- Review -----
 
-    def _start_review(self, prior_edits: dict[int, SentenceEdit] | None = None) -> None:
+    def _start_review(
+        self,
+        prior_edits: dict[int, SentenceEdit] | None = None,
+        needs_verification_ids: set[int] | None = None,
+        summary_note: str | None = None,
+    ) -> None:
         assert self._transcript is not None
         matches = find_matches(self._transcript, self.settings.words)
-        default_edits = build_default_sentence_edits(self._transcript, matches)
-        self.review_page.set_sentence_edits(self._transcript, default_edits, prior_edits)
+        default_edits = build_default_sentence_edits(self._transcript, matches, needs_verification_ids)
+        self.review_page.set_sentence_edits(self._transcript, default_edits, prior_edits, summary_note)
         self.stack.setCurrentWidget(self.review_page)
 
     def _on_review_confirmed(self, sentence_edits: dict[int, SentenceEdit]) -> None:

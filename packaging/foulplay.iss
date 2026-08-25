@@ -5,8 +5,9 @@
 ; Build with (after running PyInstaller to produce dist\FoulPlay):
 ;   "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\foulplay.iss
 
+; MyAppVersion must be kept in sync with core/version.py's APP_VERSION.
 #define MyAppName "FoulPlay"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "0.3.0"
 #define MyAppPublisher "FoulPlay"
 #define MyAppExeName "FoulPlay.exe"
 

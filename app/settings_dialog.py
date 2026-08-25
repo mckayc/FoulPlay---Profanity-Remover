@@ -302,6 +302,29 @@ class TranscriptionTab(QWidget):
         layout.addRow("Whisper model:", self.model_combo)
         layout.addRow("", model_note)
 
+        self.prioritize_speed_checkbox = QCheckBox("Prioritize speed over accuracy for the full-video pass")
+        self.prioritize_speed_checkbox.setChecked(settings.performance.prioritize_speed)
+        prioritize_speed_note = QLabel(
+            "Off by default: the model above runs across the whole video for the best transcript "
+            "and subtitle quality. Turning this on uses the faster model below for the full-video "
+            "pass instead -- noticeably faster, but the transcript/subtitle text throughout the "
+            "video will be less accurate. Either way, if you supply a subtitle file, it's used as "
+            "an independent safety net to catch words the full-video pass might have missed -- "
+            "that never depends on this setting."
+        )
+        prioritize_speed_note.setWordWrap(True)
+        layout.addRow("", self.prioritize_speed_checkbox)
+        layout.addRow("", prioritize_speed_note)
+
+        self.fast_model_combo = QComboBox()
+        self.fast_model_combo.addItems(WHISPER_MODEL_SIZES)
+        if settings.performance.whisper_fast_model_size in WHISPER_MODEL_SIZES:
+            self.fast_model_combo.setCurrentText(settings.performance.whisper_fast_model_size)
+        fast_model_note = QLabel("Only used for the full-video pass when \"Prioritize speed\" above is checked.")
+        fast_model_note.setWordWrap(True)
+        layout.addRow("Fast model:", self.fast_model_combo)
+        layout.addRow("", fast_model_note)
+
         self.language_combo = QComboBox()
         self.language_combo.addItem("English", "en")
         self.language_combo.addItem("Auto-detect", "")
@@ -330,6 +353,8 @@ class TranscriptionTab(QWidget):
 
         return PerformanceSettings(
             whisper_model_size=self.model_combo.currentText(),
+            whisper_fast_model_size=self.fast_model_combo.currentText(),
+            prioritize_speed=self.prioritize_speed_checkbox.isChecked(),
             whisper_language=self.language_combo.currentData(),
             whisper_vad_filter=self.vad_checkbox.isChecked(),
             whisper_beam_size=self.beam_size_spin.value(),

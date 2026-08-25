@@ -39,6 +39,7 @@ def _sentence_edit_from_dict(data: dict) -> SentenceEdit:
         flagged_spans=[tuple(span) for span in data.get("flagged_spans", [])],
         excluded_word_indices=set(data.get("excluded_word_indices", [])),
         custom_subtitle_text=data.get("custom_subtitle_text"),
+        needs_verification=data.get("needs_verification", False),
     )
 
 

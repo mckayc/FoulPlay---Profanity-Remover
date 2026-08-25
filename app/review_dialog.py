@@ -29,6 +29,8 @@ from PySide6.QtWidgets import (
 from core.sentence_edit import SentenceEdit, subtitle_text_for_sentence
 from core.transcript import Transcript
 
+from .style import TEXT, TEXT_MUTED
+
 
 class ClickableWordsLabel(QLabel):
     """Renders a sentence as individually clickable words; clicking a word
@@ -88,17 +90,19 @@ class SentenceCard(QFrame):
 
         layout = QVBoxLayout(self)
 
-        previous_sentence = transcript.sentence_by_id(sentence_id - 1)
-        if previous_sentence is not None:
-            previous_label = QLabel(f"… {html.escape(previous_sentence.text)}")
-            previous_label.setProperty("muted", True)
-            previous_label.setWordWrap(True)
-            layout.addWidget(previous_label)
+        if self.edit.needs_verification:
+            warning_label = QLabel(
+                "⚠ Subtitle suggests profanity here that couldn't be confirmed -- please check manually."
+            )
+            warning_label.setProperty("warning", True)
+            warning_label.setWordWrap(True)
+            layout.addWidget(warning_label)
 
         header = QHBoxLayout()
-        original_label = QLabel(f"<b>Original:</b> {html.escape(self.sentence.text)}")
-        original_label.setWordWrap(True)
-        header.addWidget(original_label, 1)
+        context_label = QLabel(self._build_context_html(transcript, sentence_id))
+        context_label.setTextFormat(Qt.TextFormat.RichText)
+        context_label.setWordWrap(True)
+        header.addWidget(context_label, 1)
         self.edit_checkbox = QCheckBox("Edit")
         self.edit_checkbox.setChecked(self.edit.edit_enabled)
         self.edit_checkbox.toggled.connect(self._on_edit_toggled)
@@ -139,14 +143,31 @@ class SentenceCard(QFrame):
 
         layout.addLayout(columns)
 
-        next_sentence = transcript.sentence_by_id(sentence_id + 1)
-        if next_sentence is not None:
-            next_label = QLabel(f"{html.escape(next_sentence.text)} …")
-            next_label.setProperty("muted", True)
-            next_label.setWordWrap(True)
-            layout.addWidget(next_label)
-
         self._refresh()
+
+    @staticmethod
+    def _build_context_html(transcript: Transcript, sentence_id: int) -> str:
+        """A single flowing paragraph -- muted-colored previous/next
+        sentences around the current one in its normal (non-bold) text
+        color -- instead of separate stacked lines with an "Original:"
+        label, which wasted vertical space for little benefit. All three
+        pieces are wrapped in real <span> tags (not just escaped text) so
+        Qt's rich-text auto-detection actually kicks in and decodes the
+        escaped entities -- a plain escaped string with no markup around
+        it gets shown as literal text (e.g. "don&#x27;t") instead of being
+        interpreted, which was a real bug in the old previous/next labels.
+        """
+        sentence = transcript.sentence_by_id(sentence_id)
+        previous_sentence = transcript.sentence_by_id(sentence_id - 1)
+        next_sentence = transcript.sentence_by_id(sentence_id + 1)
+
+        parts = []
+        if previous_sentence is not None:
+            parts.append(f'<span style="color:{TEXT_MUTED};">… {html.escape(previous_sentence.text)}</span>')
+        parts.append(f'<span style="color:{TEXT}; font-weight:600;">{html.escape(sentence.text)}</span>')
+        if next_sentence is not None:
+            parts.append(f'<span style="color:{TEXT_MUTED};">{html.escape(next_sentence.text)} …</span>')
+        return " ".join(parts)
 
     def _refresh(self) -> None:
         enabled = self.edit.edit_enabled
@@ -237,6 +258,7 @@ class ReviewPage(QWidget):
         transcript: Transcript,
         default_edits: dict[int, SentenceEdit],
         prior_edits: dict[int, SentenceEdit] | None = None,
+        summary_note: str | None = None,
     ) -> None:
         prior_edits = prior_edits or {}
 
@@ -248,14 +270,20 @@ class ReviewPage(QWidget):
 
         self._cards = []
         if not default_edits:
-            self.info_label.setText("No words from your filter list were found in this video.")
+            text = "No words from your filter list were found in this video."
+            if summary_note:
+                text += "\n" + summary_note
+            self.info_label.setText(text)
             return
 
-        self.info_label.setText(
+        text = (
             f"Found flagged words in {len(default_edits)} sentence(s). Click a word in the Audio "
             "column to mute/unmute it, uncheck Edit to leave a sentence untouched, or uncheck "
             "Mirror to write custom subtitles independent of the audio."
         )
+        if summary_note:
+            text += "\n" + summary_note
+        self.info_label.setText(text)
         for sentence_id in sorted(default_edits):
             default_edit = default_edits[sentence_id]
             initial_edit = copy.deepcopy(prior_edits.get(sentence_id, default_edit))

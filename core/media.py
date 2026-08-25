@@ -75,6 +75,32 @@ def probe(path: Path) -> MediaProbe:
     return media_probe
 
 
+def extract_subtitle(source: Path, dest_srt: Path, stream_index: int = 0) -> None:
+    """Extracts one embedded subtitle stream to an SRT file, so it can be
+    fed into pysubs2 like any sidecar subtitle file."""
+    ffmpeg = require_tool("ffmpeg")
+    dest_srt.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [ffmpeg, "-y", "-i", str(source), "-map", f"0:s:{stream_index}", str(dest_srt)]
+    logger.debug("Running: %s", " ".join(cmd))
+    try:
+        proc.run(cmd, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        logger.error("ffmpeg subtitle extraction failed: %s\nstderr: %s", exc, exc.stderr)
+        raise
+    logger.info("Extracted subtitle stream %d from %s -> %s", stream_index, source, dest_srt)
+
+
+def find_sidecar_subtitle(video_path: Path) -> Path | None:
+    """Looks for a subtitle file with the same base name next to the
+    video (e.g. Movie.mkv -> Movie.srt), the common convention for
+    manually-downloaded subtitles."""
+    for ext in (".srt", ".ass", ".vtt"):
+        candidate = video_path.with_suffix(ext)
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def extract_audio(source: Path, dest_wav: Path, stream_index: int = 0) -> None:
     """Extract one audio stream as 16kHz mono PCM WAV (Whisper's expected input)."""
     ffmpeg = require_tool("ffmpeg")

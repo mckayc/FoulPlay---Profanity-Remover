@@ -84,6 +84,14 @@ WHISPER_MODEL_SIZES = ["tiny", "base", "small", "medium", "large-v2", "large-v3"
 
 class PerformanceSettings(BaseModel):
     whisper_model_size: str = "medium"
+    # Only used as the full-video baseline pass when prioritize_speed is
+    # on -- otherwise whisper_model_size runs everywhere and this is
+    # unused. Kept deliberately separate from "a subtitle was supplied":
+    # trading full-video accuracy for speed should be something a user
+    # opts into, not something that silently kicks in just because they
+    # attached a subtitle for the (independent) safety-net feature.
+    whisper_fast_model_size: str = "small"
+    prioritize_speed: bool = False
     # Forcing a known language skips language-detection and biases decoding,
     # which is both faster and more accurate than auto-detect for movies we
     # already know are in English. Empty string = auto-detect.
