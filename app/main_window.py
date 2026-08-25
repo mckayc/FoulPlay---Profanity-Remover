@@ -39,6 +39,7 @@ from settings.config import load_settings
 
 from .dependency_dialog import DependencyInstallDialog
 from .ffmpeg_install_dialog import FfmpegInstallDialog
+from .prerun_dialog import PreRunPage
 from .process_dialog import ProcessPage
 from .review_dialog import ReviewPage
 from .settings_dialog import SettingsDialog
@@ -158,6 +159,7 @@ class MainWindow(QMainWindow):
         # State carried across the current Import/Open Project -> Review ->
         # Process flow. Cleared on returning Home.
         self._video_path: Path | None = None
+        self._pending_subtitle_path: Path | None = None
         self._transcript: Transcript | None = None
         self._sentence_edits: dict[int, SentenceEdit] = {}
         self._transcribe_workdir: str | None = None
@@ -167,17 +169,28 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.stack)
 
         self.home_page = HomePage()
+        self.prerun_page = PreRunPage()
         self.transcribe_page = TranscribePage()
         self.review_page = ReviewPage()
         self.process_page = ProcessPage()
         self.done_page = DonePage()
-        for page in (self.home_page, self.transcribe_page, self.review_page, self.process_page, self.done_page):
+        for page in (
+            self.home_page,
+            self.prerun_page,
+            self.transcribe_page,
+            self.review_page,
+            self.process_page,
+            self.done_page,
+        ):
             self.stack.addWidget(page)
 
         self.home_page.import_button.clicked.connect(self._import_video)
         self.home_page.open_project_button.clicked.connect(self._open_project)
         self.home_page.settings_button.clicked.connect(self._open_settings)
         self.home_page.copy_log_button.clicked.connect(self._copy_log)
+
+        self.prerun_page.continued.connect(self._start_transcription)
+        self.prerun_page.cancelled.connect(self._go_home)
 
         self.transcribe_page.finished_ok.connect(self._on_transcribed)
         self.transcribe_page.failed.connect(self._on_transcribe_failed)
@@ -202,6 +215,7 @@ class MainWindow(QMainWindow):
     def _go_home(self) -> None:
         self._cleanup_workdirs()
         self._video_path = None
+        self._pending_subtitle_path = None
         self._transcript = None
         self._sentence_edits = {}
         self.home_page.refresh_hardware_report()
@@ -266,10 +280,21 @@ class MainWindow(QMainWindow):
 
         self._video_path = video_path
         self._transcribe_workdir = tempfile.mkdtemp(prefix="foulplay_")
-        subtitle_path = self._acquire_subtitle(video_path, Path(self._transcribe_workdir))
+        self._pending_subtitle_path = self._acquire_subtitle(video_path, Path(self._transcribe_workdir))
+
+        self.prerun_page.set_up(video_path, self._pending_subtitle_path, self.settings)
+        self.stack.setCurrentWidget(self.prerun_page)
+
+    def _start_transcription(self) -> None:
+        assert self._video_path is not None
+        assert self._transcribe_workdir is not None
         self.stack.setCurrentWidget(self.transcribe_page)
         self.transcribe_page.start(
-            video_path, subtitle_path, self.settings.performance, self.settings.words, Path(self._transcribe_workdir)
+            self._video_path,
+            self._pending_subtitle_path,
+            self.settings.performance,
+            self.settings.words,
+            Path(self._transcribe_workdir),
         )
 
     def _acquire_subtitle(self, video_path: Path, workdir: Path) -> Path | None:

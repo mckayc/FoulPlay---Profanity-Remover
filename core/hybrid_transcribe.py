@@ -69,7 +69,14 @@ def load_subtitle_events(subtitle_path: Path) -> list[SubtitleEvent]:
     return events
 
 
-def _pseudo_transcript_from_events(events: list[SubtitleEvent]) -> Transcript:
+def baseline_model_size(performance: PerformanceSettings) -> str:
+    """Which model the full-video baseline pass uses -- shared with the
+    pre-run time estimate so it can never drift out of sync with what
+    hybrid_transcribe() actually does."""
+    return performance.whisper_fast_model_size if performance.prioritize_speed else performance.whisper_model_size
+
+
+def pseudo_transcript_from_events(events: list[SubtitleEvent]) -> Transcript:
     """Adapts subtitle events into a Transcript-shaped structure so the
     existing find_matches() can scan them without new matching logic --
     each event becomes one pseudo-sentence whose words all share its
@@ -176,7 +183,7 @@ def hybrid_transcribe(
     emit("Extracting audio...")
     media.extract_audio(video_path, audio_path)
 
-    baseline_model = performance.whisper_fast_model_size if performance.prioritize_speed else performance.whisper_model_size
+    baseline_model = baseline_model_size(performance)
     baseline_label = "fast" if performance.prioritize_speed else "full-quality"
     emit(f"Running {baseline_label} transcription pass (model={baseline_model})...")
     transcript = transcribe_audio(
@@ -210,7 +217,7 @@ def hybrid_transcribe(
     stats.synced = True
     emit(f"Synced subtitle to video (offset: {sync.offset:+.1f}s, scale: {sync.scale:.4f})")
 
-    pseudo = _pseudo_transcript_from_events(events)
+    pseudo = pseudo_transcript_from_events(events)
     subtitle_matches = find_matches(pseudo, word_entries)
     if not subtitle_matches:
         emit("Subtitle contains no flagged words.")

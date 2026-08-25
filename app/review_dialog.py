@@ -33,8 +33,13 @@ from .style import TEXT, TEXT_MUTED
 
 
 class ClickableWordsLabel(QLabel):
-    """Renders a sentence as individually clickable words; clicking a word
-    toggles it between included (normal) and excluded (struck-through).
+    """Renders one flowing line: muted previous-sentence context, the
+    current sentence as individually clickable words (click to toggle a
+    word between included/excluded), then muted next-sentence context.
+    Combining context and the editable sentence into a single line (rather
+    than three stacked rows plus a separate "Original:" line) keeps each
+    card to roughly two rows in the common case, wrapping only as the
+    window narrows or the text runs long.
     """
 
     word_toggled = Signal(int)  # word_index
@@ -49,24 +54,36 @@ class ClickableWordsLabel(QLabel):
     def _on_link_activated(self, href: str) -> None:
         self.word_toggled.emit(int(href))
 
-    def render_words(
+    def render(
         self,
+        transcript: Transcript,
+        sentence_id: int,
         word_indices: list[int],
         words_text: dict[int, str],
         excluded: set[int],
         enabled: bool,
     ) -> None:
         parts = []
+
+        previous_sentence = transcript.sentence_by_id(sentence_id - 1)
+        if previous_sentence is not None:
+            parts.append(f'<span style="color:{TEXT_MUTED};">… {html.escape(previous_sentence.text)}</span>')
+
         for index in word_indices:
             text = html.escape(words_text[index])
             if not enabled:
-                parts.append(f'<span style="color:#9aa0aa;">{text}</span>')
+                parts.append(f'<span style="color:{TEXT_MUTED};">{text}</span>')
             elif index in excluded:
                 parts.append(
                     f'<a href="{index}" style="color:#c0392b; text-decoration: line-through;">{text}</a>'
                 )
             else:
-                parts.append(f'<a href="{index}" style="color:#1e2126; text-decoration: none;">{text}</a>')
+                parts.append(f'<a href="{index}" style="color:{TEXT}; text-decoration: none;">{text}</a>')
+
+        next_sentence = transcript.sentence_by_id(sentence_id + 1)
+        if next_sentence is not None:
+            parts.append(f'<span style="color:{TEXT_MUTED};">{html.escape(next_sentence.text)} …</span>')
+
         self.setText(" ".join(parts))
 
 
@@ -90,98 +107,76 @@ class SentenceCard(QFrame):
 
         layout = QVBoxLayout(self)
 
-        if self.edit.needs_verification:
-            warning_label = QLabel(
-                "⚠ Subtitle suggests profanity here that couldn't be confirmed -- please check manually."
-            )
-            warning_label.setProperty("warning", True)
-            warning_label.setWordWrap(True)
-            layout.addWidget(warning_label)
-
+        # Row 1: controls. Kept to one row -- a warning indicator (when
+        # present) plus the Edit/Mirror checkboxes and reset button.
         header = QHBoxLayout()
-        context_label = QLabel(self._build_context_html(transcript, sentence_id))
-        context_label.setTextFormat(Qt.TextFormat.RichText)
-        context_label.setWordWrap(True)
-        header.addWidget(context_label, 1)
-        self.edit_checkbox = QCheckBox("Edit")
-        self.edit_checkbox.setChecked(self.edit.edit_enabled)
-        self.edit_checkbox.toggled.connect(self._on_edit_toggled)
-        header.addWidget(self.edit_checkbox)
-        layout.addLayout(header)
-
-        columns = QHBoxLayout()
-
-        audio_col = QVBoxLayout()
-        audio_header = QHBoxLayout()
-        audio_header.addWidget(QLabel("<b>Audio</b>"))
+        if self.edit.needs_verification:
+            warning_label = QLabel("⚠ needs verification")
+            warning_label.setProperty("warning", True)
+            warning_label.setToolTip(
+                "Subtitle suggests profanity here that couldn't be confirmed -- please check manually."
+            )
+            header.addWidget(warning_label)
+        header.addStretch(1)
         self.reset_button = QToolButton()
         self.reset_button.setText("↺")
         self.reset_button.setToolTip("Reset this sentence to defaults")
         self.reset_button.clicked.connect(self._on_reset)
-        audio_header.addWidget(self.reset_button)
-        audio_header.addStretch(1)
-        audio_col.addLayout(audio_header)
-        self.audio_label = ClickableWordsLabel()
-        self.audio_label.word_toggled.connect(self._on_word_toggled)
-        audio_col.addWidget(self.audio_label)
-        columns.addLayout(audio_col, 1)
-
-        subtitle_col = QVBoxLayout()
-        subtitle_header = QHBoxLayout()
-        subtitle_header.addWidget(QLabel("<b>Subtitles</b>"))
-        subtitle_header.addStretch(1)
-        self.mirror_checkbox = QCheckBox("Mirror the subtitles with the audio")
+        header.addWidget(self.reset_button)
+        self.edit_checkbox = QCheckBox("Edit")
+        self.edit_checkbox.setToolTip("Uncheck to leave this sentence completely untouched in both audio and subtitles.")
+        self.edit_checkbox.setChecked(self.edit.edit_enabled)
+        self.edit_checkbox.toggled.connect(self._on_edit_toggled)
+        header.addWidget(self.edit_checkbox)
+        self.mirror_checkbox = QCheckBox("Mirror subtitles")
+        self.mirror_checkbox.setToolTip(
+            "When checked, subtitles automatically match the audio (same words removed, no replacement "
+            "text). Uncheck to write custom subtitle text instead."
+        )
         self.mirror_checkbox.setChecked(self.edit.mirror)
         self.mirror_checkbox.toggled.connect(self._on_mirror_toggled)
-        subtitle_header.addWidget(self.mirror_checkbox)
-        subtitle_col.addLayout(subtitle_header)
-        self.subtitle_edit = QPlainTextEdit()
-        self.subtitle_edit.setFixedHeight(60)
-        self.subtitle_edit.textChanged.connect(self._on_subtitle_text_changed)
-        subtitle_col.addWidget(self.subtitle_edit)
-        columns.addLayout(subtitle_col, 1)
+        header.addWidget(self.mirror_checkbox)
+        layout.addLayout(header)
 
-        layout.addLayout(columns)
+        # Row 2: previous context + clickable current-sentence words (click
+        # to mute/unmute) + next context, all in one flowing line. No
+        # separate "Original:" line -- crossed-out words already show what
+        # was removed, so nothing is lost by not repeating the sentence.
+        self.words_label = ClickableWordsLabel()
+        self.words_label.word_toggled.connect(self._on_word_toggled)
+        layout.addWidget(self.words_label)
+
+        # Row 3 (conditional): only shown when Mirror is off, since that's
+        # the only time subtitle text can differ from the audio words above.
+        self.subtitle_row = QWidget()
+        subtitle_row_layout = QHBoxLayout(self.subtitle_row)
+        subtitle_row_layout.setContentsMargins(0, 0, 0, 0)
+        subtitle_row_layout.addWidget(QLabel("Subtitles:"))
+        self.subtitle_edit = QPlainTextEdit()
+        self.subtitle_edit.setFixedHeight(44)
+        self.subtitle_edit.textChanged.connect(self._on_subtitle_text_changed)
+        subtitle_row_layout.addWidget(self.subtitle_edit, 1)
+        layout.addWidget(self.subtitle_row)
 
         self._refresh()
-
-    @staticmethod
-    def _build_context_html(transcript: Transcript, sentence_id: int) -> str:
-        """A single flowing paragraph -- muted-colored previous/next
-        sentences around the current one in its normal (non-bold) text
-        color -- instead of separate stacked lines with an "Original:"
-        label, which wasted vertical space for little benefit. All three
-        pieces are wrapped in real <span> tags (not just escaped text) so
-        Qt's rich-text auto-detection actually kicks in and decodes the
-        escaped entities -- a plain escaped string with no markup around
-        it gets shown as literal text (e.g. "don&#x27;t") instead of being
-        interpreted, which was a real bug in the old previous/next labels.
-        """
-        sentence = transcript.sentence_by_id(sentence_id)
-        previous_sentence = transcript.sentence_by_id(sentence_id - 1)
-        next_sentence = transcript.sentence_by_id(sentence_id + 1)
-
-        parts = []
-        if previous_sentence is not None:
-            parts.append(f'<span style="color:{TEXT_MUTED};">… {html.escape(previous_sentence.text)}</span>')
-        parts.append(f'<span style="color:{TEXT}; font-weight:600;">{html.escape(sentence.text)}</span>')
-        if next_sentence is not None:
-            parts.append(f'<span style="color:{TEXT_MUTED};">{html.escape(next_sentence.text)} …</span>')
-        return " ".join(parts)
 
     def _refresh(self) -> None:
         enabled = self.edit.edit_enabled
         excluded = self.edit.excluded_word_indices if enabled else set()
-        self.audio_label.render_words(self._word_indices, self._words_text, excluded, enabled)
+        self.words_label.render(
+            self.transcript, self.sentence.id, self._word_indices, self._words_text, excluded, enabled
+        )
 
         self.mirror_checkbox.setEnabled(enabled)
 
-        subtitle_text = subtitle_text_for_sentence(self.transcript, self.sentence, self.edit)
-        self.subtitle_edit.blockSignals(True)
-        if self.subtitle_edit.toPlainText() != subtitle_text:
-            self.subtitle_edit.setPlainText(subtitle_text)
-        self.subtitle_edit.setReadOnly(not enabled or self.edit.mirror)
-        self.subtitle_edit.blockSignals(False)
+        show_subtitle_row = enabled and not self.edit.mirror
+        self.subtitle_row.setVisible(show_subtitle_row)
+        if show_subtitle_row:
+            subtitle_text = subtitle_text_for_sentence(self.transcript, self.sentence, self.edit)
+            self.subtitle_edit.blockSignals(True)
+            if self.subtitle_edit.toPlainText() != subtitle_text:
+                self.subtitle_edit.setPlainText(subtitle_text)
+            self.subtitle_edit.blockSignals(False)
 
     def _on_word_toggled(self, word_index: int) -> None:
         if not self.edit.edit_enabled:
@@ -277,9 +272,9 @@ class ReviewPage(QWidget):
             return
 
         text = (
-            f"Found flagged words in {len(default_edits)} sentence(s). Click a word in the Audio "
-            "column to mute/unmute it, uncheck Edit to leave a sentence untouched, or uncheck "
-            "Mirror to write custom subtitles independent of the audio."
+            f"Found flagged words in {len(default_edits)} sentence(s). Click a word below to mute/unmute "
+            "it, uncheck Edit to leave a sentence untouched, or uncheck Mirror to write custom subtitles "
+            "independent of the audio."
         )
         if summary_note:
             text += "\n" + summary_note
